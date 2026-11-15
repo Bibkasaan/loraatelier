@@ -1,0 +1,385 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LoRA Atelier — таблица заявок</title>
+<script>try{document.documentElement.dataset.theme=localStorage.getItem('lora_theme')||'dark';}catch(e){}</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,700;1,500&family=UnifrakturCook:wght@700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+<div class="wrap">
+
+  <button class="themebtn" id="themeBtn" type="button" title="Сменить тему" aria-label="Сменить тему">☾</button>
+
+  <header class="hero">
+    <div class="logobox" id="logoBox">
+      <svg class="heart" viewBox="0 0 200 100" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true">
+        <g id="wing">
+          <path d="M78 46 C58 24 30 22 6 34 C22 34 34 38 44 46"/>
+          <path d="M76 54 C56 38 32 40 12 52 C28 50 40 52 50 58"/>
+          <path d="M76 62 C60 52 40 55 24 66 C38 63 48 65 56 70"/>
+          <path d="M78 70 C66 64 52 68 40 78 C50 75 58 76 64 80"/>
+        </g>
+        <use href="#wing" transform="translate(200 0) scale(-1 1)"/>
+        <path d="M100 86 C70 64 66 42 82 36 C91 33 98 38 100 44 C102 38 109 33 118 36 C134 42 130 64 100 86Z" fill="var(--panel)" stroke="currentColor" stroke-width="1.8"/>
+        <path d="M100 76 C82 61 80 48 88 45 C94 43 99 47 100 51 C101 47 106 43 112 45 C120 48 118 61 100 76Z" stroke="#c4203f" stroke-width="1.2"/>
+      </svg>
+    </div>
+    <h1 class="gothic">LoRA Atelier</h1>
+    <p class="sub">таблица заявок · что заказано, что шьётся, что готово</p>
+    <div class="author">
+      <span>Автор: <b class="gothic" id="author">CatatonicPsychosis</b></span>
+      <a class="btn ghost" id="tg" href="#" target="_blank" rel="noopener">Зайти в ТГК ✝</a>
+    </div>
+    <div class="actions">
+      <button class="btn red" data-open="dlgSubmit">Отправить заявку</button>
+      <button class="btn" data-open="dlgCheck">Проверить статус заявки</button>
+      <button class="btn" data-open="dlgCancel">Отменить предыдущую заявку</button>
+    </div>
+  </header>
+
+  <div class="lace"></div>
+
+  <nav class="tabs">
+    <button class="on" data-tab="board">Таблица</button>
+    <button data-tab="gallery">Готовые LoRA</button>
+    <button data-tab="top">Топ ♥</button>
+  </nav>
+
+  <!-- Таблица заявок -->
+  <section id="board">
+    <div class="chips" id="boardChips"></div>
+    <div class="cols">
+      <div class="col requested"><h2>Заявлено <span id="n-requested"></span></h2><div id="c-requested"></div></div>
+      <div class="col in_progress"><h2>В процессе <span id="n-in_progress"></span></h2><div id="c-in_progress"></div></div>
+      <div class="col done"><h2>Готово <span id="n-done"></span></h2><div id="c-done"></div></div>
+    </div>
+  </section>
+
+  <!-- Готовые LoRA -->
+  <section id="gallery" hidden>
+    <div class="controls">
+      <select id="gType"></select>
+      <select id="gSort">
+        <option value="new">Сначала новые</option>
+        <option value="hearts">По сердечкам</option>
+      </select>
+    </div>
+    <div class="grid" id="grid"></div>
+  </section>
+
+  <!-- Топ -->
+  <section id="top" hidden>
+    <p class="sub" style="text-align:center;margin-top:0">самые любимые LoRA — по сердечкам посетителей</p>
+    <div class="toplist" id="toplist"></div>
+  </section>
+
+  <footer>
+    <div class="lace"></div>
+    <span class="gothic">CatatonicPsychosis</span><br>
+    заявки принимаются без регистрации · сохрани код заявки, он нужен для проверки и отмены
+  </footer>
+</div>
+<div id="toast"></div>
+
+<!-- Отправить заявку -->
+<dialog id="dlgSubmit">
+  <h2>Новая заявка</h2>
+  <form id="fSubmit" autocomplete="off">
+    <label>Тип LoRA</label>
+    <select name="type" id="sType">
+      <option value="character">Персонаж</option>
+      <option value="style">Стиль</option>
+      <option value="concept">Концепт</option>
+      <option value="other">Другое</option>
+    </select>
+    <label id="lName">Имя персонажа *</label>
+    <input name="character" required maxlength="100" id="iName">
+    <label id="lSrc">Источник</label>
+    <textarea name="source" maxlength="500" id="iSrc" rows="3"></textarea>
+    <label>Твой ник в Telegram (необязательно)</label>
+    <input name="requester" maxlength="80" placeholder="@nick — видно только автору">
+    <div class="hp"><label>Не заполнять</label><input name="website" tabindex="-1" autocomplete="off"></div>
+    <div id="submitMsg"></div>
+    <div class="row">
+      <button type="button" class="btn" data-close>Закрыть</button>
+      <button class="btn red" type="submit">Отправить</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Проверить статус -->
+<dialog id="dlgCheck">
+  <h2>Статус заявки</h2>
+  <form id="fCheck" autocomplete="off">
+    <label>Код заявки</label>
+    <input name="code" required placeholder="LORA-XXXXXXXX">
+    <div id="checkMsg"></div>
+    <div class="row">
+      <button type="button" class="btn" data-close>Закрыть</button>
+      <button class="btn" type="submit">Проверить</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Отменить -->
+<dialog id="dlgCancel">
+  <h2>Отмена заявки</h2>
+  <form id="fCancel" autocomplete="off">
+    <p style="color:var(--dim);margin:0">Отменить можно только заявку, которую ещё не взяли в работу.</p>
+    <label>Код заявки</label>
+    <input name="code" required placeholder="LORA-XXXXXXXX">
+    <div id="cancelMsg"></div>
+    <div class="row">
+      <button type="button" class="btn" data-close>Закрыть</button>
+      <button class="btn danger" type="submit">Отменить заявку</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Пост «Готовая LoRA» -->
+<dialog id="dlgPost" class="wide">
+  <div id="postBox"></div>
+  <div class="row"><button type="button" class="btn" data-close>Закрыть</button></div>
+</dialog>
+
+<script src="config.js"></script>
+<script src="api.js"></script>
+<script>
+(function () {
+  const C = window.SITE_CONFIG, api = window.LoraApi;
+  const $ = (s) => document.querySelector(s);
+  const $$ = (s) => [...document.querySelectorAll(s)];
+  const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const safeUrl = (u) => (/^https:\/\//i.test(String(u || "").trim()) ? String(u).trim() : "");
+  const ST = { requested: "Заявлено", in_progress: "В процессе", done: "Готово", cancelled: "Отменено" };
+  const TYPES = { character: "Персонаж", style: "Стиль", concept: "Концепт", other: "Другое" };
+  const FORM = {
+    character: { name: "Имя персонажа *", ph: "например: Linnea", src: "Источник (игра, аниме и т.п.)", sph: "например: Genshin Impact" },
+    style: { name: "Название стиля или имя художника *", ph: "например: акварельный стиль 90-х", src: "Референсы (ссылки на художника, примеры работ)", sph: "ссылки или описание стиля" },
+    concept: { name: "Название концепта *", ph: "например: витилиго", src: "Описание и референсы", sph: "что именно должно получаться, ссылки на примеры" },
+    other: { name: "Название *", ph: "что нужно?", src: "Описание и референсы", sph: "расскажи подробнее" }
+  };
+  const fmt = (d) => new Date(d).toLocaleDateString("ru-RU", { day: "numeric", month: "long" });
+  const store = {
+    get: (k) => { try { return localStorage.getItem(k) || ""; } catch (e) { return ""; } },
+    set: (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} }
+  };
+  const badge = (t) => `<span class="badge ${esc(t)}">${esc(TYPES[t] || TYPES.other)}</span>`;
+
+  $("#author").textContent = C.AUTHOR || "CatatonicPsychosis";
+  $("#tg").href = C.TELEGRAM_URL || "#";
+
+  // ---- оформление: фон, логотип, тема ----
+  if (C.BG_URL) {
+    const bg = document.createElement("div");
+    bg.className = "bgimg";
+    bg.style.backgroundImage = 'url("' + String(C.BG_URL).replace(/"/g, "%22") + '")';
+    document.body.prepend(bg);
+  }
+  const logoBox = $("#logoBox"), defaultLogo = logoBox.innerHTML;
+  function applyTheme(t) {
+    document.documentElement.dataset.theme = t;
+    $("#themeBtn").textContent = t === "light" ? "☀" : "☾";
+    const url = (t === "light" && C.LOGO_URL_LIGHT) || C.LOGO_URL;
+    logoBox.innerHTML = url ? `<img class="logo" src="${esc(url)}" alt="">` : defaultLogo;
+  }
+  applyTheme(document.documentElement.dataset.theme === "light" ? "light" : "dark");
+  $("#themeBtn").addEventListener("click", () => {
+    const t = document.documentElement.dataset.theme === "light" ? "dark" : "light";
+    store.set("lora_theme", t); applyTheme(t);
+  });
+
+  let toastTimer;
+  function toast(text) {
+    $("#toast").innerHTML = `<div class="msg err">${esc(text)}</div>`;
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => ($("#toast").innerHTML = ""), 3500);
+  }
+
+  // ---- окна ----
+  $$("[data-open]").forEach((b) => b.addEventListener("click", () => {
+    const d = $("#" + b.dataset.open);
+    const last = store.get("lora_last_code");
+    if (last) d.querySelectorAll('input[name="code"]').forEach((i) => { if (!i.value) i.value = last; });
+    d.showModal();
+  }));
+  $$("dialog").forEach((d) => {
+    d.addEventListener("click", (e) => { if (e.target === d) d.close(); });
+    d.querySelectorAll("[data-close]").forEach((b) => b.addEventListener("click", () => d.close()));
+  });
+
+  // ---- вкладки ----
+  $$("[data-tab]").forEach((b) => b.addEventListener("click", () => {
+    $$("[data-tab]").forEach((x) => x.classList.toggle("on", x === b));
+    ["board", "gallery", "top"].forEach((id) => ($("#" + id).hidden = b.dataset.tab !== id));
+  }));
+
+  // ---- таблица ----
+  let boardRows = [], boardType = "";
+  function renderChips() {
+    $("#boardChips").innerHTML = [["", "Все"], ...Object.entries(TYPES)].map(([k, v]) =>
+      `<button class="chip ${boardType === k ? "on" : ""}" data-t="${k}">${esc(v)}</button>`).join("");
+    $$("#boardChips .chip").forEach((c) => c.addEventListener("click", () => { boardType = c.dataset.t; renderChips(); renderBoard(); }));
+  }
+  function renderBoard() {
+    const rows = boardRows.filter((r) => !boardType || (r.lora_type || "character") === boardType);
+    ["requested", "in_progress", "done"].forEach((st) => {
+      const list = rows.filter((r) => r.status === st);
+      $("#n-" + st).textContent = list.length;
+      $("#c-" + st).innerHTML = list.length ? list.map((r) =>
+        `<article class="card">
+          ${badge(r.lora_type || "character")}
+          <h3>${esc(r.character_name)}</h3>
+          ${r.source ? `<p class="src">${esc(r.source)}</p>` : ""}
+          ${r.note ? `<p class="note">⚠ ${esc(r.note)}</p>` : ""}
+          <time>обновлено ${fmt(r.updated_at)}</time>
+        </article>`).join("") : `<p class="empty">пока пусто</p>`;
+    });
+  }
+
+  // ---- готовые LoRA ----
+  let posts = [], mine = new Set(), openId = null;
+  $("#gType").innerHTML = [["", "Все типы"], ...Object.entries(TYPES)].map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join("");
+  $("#gType").addEventListener("change", renderGallery);
+  $("#gSort").addEventListener("change", renderGallery);
+
+  const cover = (p) => (p.images && p.images[0] ? p.images[0].image_url : "");
+  const heartBtn = (p) => `<button class="heart-btn ${mine.has(p.id) ? "on" : ""}" data-heart="${esc(p.id)}" type="button" title="Поставить сердечко"><span class="h">${mine.has(p.id) ? "♥" : "♡"}</span><span>${p.hearts || 0}</span></button>`;
+  const civBtn = (p) => (safeUrl(p.civitai_url) ? `<a class="btn small ghost" href="${esc(safeUrl(p.civitai_url))}" target="_blank" rel="noopener noreferrer">Civitai ↗</a>` : "");
+
+  function renderGallery() {
+    const type = $("#gType").value, sort = $("#gSort").value;
+    let list = posts.filter((p) => !type || p.lora_type === type);
+    list = list.slice().sort(sort === "hearts"
+      ? (a, b) => (b.hearts - a.hearts) || (new Date(b.created_at) - new Date(a.created_at))
+      : (a, b) => new Date(b.created_at) - new Date(a.created_at));
+    $("#grid").innerHTML = list.length ? list.map((p) =>
+      `<div class="tile" data-id="${esc(p.id)}">
+        <div class="ph" style="${cover(p) ? `background-image:url('${esc(cover(p))}')` : ""}">${cover(p) ? "" : "✝"}${p.images.length > 1 ? `<span class="cnt">${p.images.length} фото</span>` : ""}</div>
+        <div class="meta">${badge(p.lora_type)}<b>${esc(p.title)}</b>
+          <div class="foot">${heartBtn(p)}${civBtn(p)}</div></div>
+      </div>`).join("") : `<p class="empty" style="grid-column:1/-1">пока ничего нет</p>`;
+    $$("#grid .tile").forEach((t) => t.addEventListener("click", (e) => {
+      if (e.target.closest("[data-heart], a")) return;
+      openPost(t.dataset.id);
+    }));
+    renderTop();
+  }
+
+  function renderTop() {
+    const list = posts.filter((p) => p.hearts > 0)
+      .sort((a, b) => (b.hearts - a.hearts) || (new Date(b.created_at) - new Date(a.created_at))).slice(0, 10);
+    $("#toplist").innerHTML = list.length ? list.map((p, i) =>
+      `<div class="toprow" data-id="${esc(p.id)}">
+        <div class="rank">${i + 1}</div>
+        <div class="th" style="${cover(p) ? `background-image:url('${esc(cover(p))}')` : ""}">${cover(p) ? "" : "✝"}</div>
+        <div>${badge(p.lora_type)}<b>${esc(p.title)}</b></div>
+        ${heartBtn(p)}
+      </div>`).join("") : `<p class="empty">Пока никто не поставил сердечко. Будь первой(ым) ♡</p>`;
+    $$("#toplist .toprow").forEach((r) => r.addEventListener("click", (e) => {
+      if (e.target.closest("[data-heart]")) return;
+      openPost(r.dataset.id);
+    }));
+  }
+
+  function openPost(id) { openId = id; renderPost(); $("#dlgPost").showModal(); }
+  function renderPost() {
+    const p = posts.find((x) => x.id === openId);
+    if (!p) return;
+    $("#postBox").innerHTML =
+      `${badge(p.lora_type)}<h2>${esc(p.title)}</h2>
+       <div class="post-acts">${heartBtn(p)}${civBtn(p)}</div>
+       ${p.description ? `<p class="post-desc">${esc(p.description)}</p>` : ""}
+       <div class="shots">${p.images.map((im) =>
+         `<figure><img src="${esc(im.image_url)}" alt="${esc(im.caption || p.title)}" loading="lazy">${im.caption ? `<figcaption>${esc(im.caption)}</figcaption>` : ""}</figure>`).join("")}</div>`;
+  }
+
+  // сердечки: делегирование на весь документ
+  document.addEventListener("click", async (e) => {
+    const b = e.target.closest("[data-heart]");
+    if (!b) return;
+    e.stopPropagation();
+    const id = b.dataset.heart, p = posts.find((x) => x.id === id);
+    if (!p) return;
+    b.disabled = true;
+    try {
+      const r = await api.toggleHeart(id);
+      p.hearts = r.hearts;
+      r.hearted ? mine.add(id) : mine.delete(id);
+      renderGallery();
+      if ($("#dlgPost").open && openId === id) renderPost();
+    } catch (err) { toast("Не удалось поставить сердечко. Попробуй позже."); }
+    finally { b.disabled = false; }
+  }, true);
+
+  async function load() {
+    try { boardRows = await api.board(); renderBoard(); }
+    catch (e) { $("#c-requested").innerHTML = `<p class="empty">Не удалось загрузить данные. Обнови страницу.</p>`; }
+    try {
+      const [p, m] = await Promise.all([api.posts(), api.myHearts().catch(() => [])]);
+      posts = p; mine = new Set(m); renderGallery();
+    } catch (e) { $("#grid").innerHTML = `<p class="empty" style="grid-column:1/-1">Не удалось загрузить посты.</p>`; }
+  }
+  renderChips();
+  load();
+
+  const msg = (el, cls, html) => { el.innerHTML = `<div class="msg ${cls}">${html}</div>`; };
+
+  // ---- форма заявки: подписи зависят от типа ----
+  function applyType() {
+    const f = FORM[$("#sType").value] || FORM.character;
+    $("#lName").textContent = f.name; $("#iName").placeholder = f.ph;
+    $("#lSrc").textContent = f.src; $("#iSrc").placeholder = f.sph;
+  }
+  $("#sType").addEventListener("change", applyType);
+  applyType();
+
+  $("#fSubmit").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const f = e.target, out = $("#submitMsg"), btn = f.querySelector("button.red");
+    if (f.website.value) return; // ловушка для ботов
+    btn.disabled = true;
+    try {
+      const code = await api.submit(f.type.value, f.character.value.trim(), f.source.value.trim(), f.requester.value.trim());
+      store.set("lora_last_code", code);
+      msg(out, "ok", `Заявка принята! Сохрани код:<span class="code">${esc(code)}</span>Он нужен, чтобы проверить статус или отменить заявку.`);
+      f.reset(); applyType(); load();
+    } catch (err) {
+      msg(out, "err", esc(err.message || "Не удалось отправить заявку"));
+    } finally { btn.disabled = false; }
+  });
+
+  $("#fCheck").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const out = $("#checkMsg");
+    try {
+      const r = await api.check(e.target.code.value);
+      if (!r) return msg(out, "err", "Заявка с таким кодом не найдена.");
+      store.set("lora_last_code", e.target.code.value.trim().toUpperCase());
+      msg(out, "ok",
+        `${esc(TYPES[r.lora_type] || "")} · <b>${esc(r.character_name)}</b>${r.source ? `<br><i>${esc(r.source)}</i>` : ""}<br>` +
+        `Статус: <span class="pill ${esc(r.status)}">${esc(ST[r.status] || r.status)}</span><br>` +
+        `Подана: ${fmt(r.created_at)} · обновлена: ${fmt(r.updated_at)}` +
+        (r.note ? `<br>⚠ ${esc(r.note)}` : ""));
+    } catch (err) { msg(out, "err", "Не удалось проверить статус. Попробуй позже."); }
+  });
+
+  $("#fCancel").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const out = $("#cancelMsg");
+    try {
+      const res = await api.cancel(e.target.code.value);
+      if (res === "ok") { msg(out, "ok", "Заявка отменена."); load(); }
+      else if (res === "not_cancellable") msg(out, "err", "Эту заявку уже взяли в работу или выполнили — отменить нельзя. Напиши автору в ТГ.");
+      else msg(out, "err", "Заявка с таким кодом не найдена.");
+    } catch (err) { msg(out, "err", "Не удалось отменить заявку. Попробуй позже."); }
+  });
+})();
+</script>
+</body>
+</html>

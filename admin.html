@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Админка — LoRA Atelier</title>
+<script>try{document.documentElement.dataset.theme=localStorage.getItem('lora_theme')||'dark';}catch(e){}</script>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,700;1,500&family=UnifrakturCook:wght@700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+<div class="wrap">
+  <button class="themebtn" id="themeBtn" type="button" title="Сменить тему" aria-label="Сменить тему">☾</button>
+  <div class="admin-bar">
+    <h1 class="gothic">Админка</h1>
+    <div class="toolbar"><a class="btn small" href="index.html">← на сайт</a><button class="btn small danger" id="logout" hidden>Выйти</button></div>
+  </div>
+  <div id="demoBanner" class="banner" hidden>Демо-режим: Supabase не подключён, данные хранятся только в этом браузере.</div>
+
+  <!-- вход -->
+  <div id="loginBox" class="panel" hidden style="max-width:420px;margin:30px auto">
+    <h3>Вход</h3>
+    <form id="fLogin">
+      <label>Почта</label><input name="email" type="email" required autocomplete="username">
+      <label>Пароль</label><input name="password" type="password" required autocomplete="current-password">
+      <div id="loginMsg"></div>
+      <div class="row"><button class="btn red" type="submit">Войти</button></div>
+    </form>
+  </div>
+
+  <!-- панель -->
+  <div id="app" hidden>
+    <nav class="tabs">
+      <button class="on" data-tab="reqs">Заявки</button>
+      <button data-tab="posts">Готовые LoRA (посты)</button>
+    </nav>
+
+    <!-- ЗАЯВКИ -->
+    <section id="reqs">
+      <div class="panel">
+        <h3>Добавить карточку вручную</h3>
+        <form id="fAdd" class="inline">
+          <div><label>Тип</label>
+            <select name="lora_type"><option value="character">Персонаж</option><option value="style">Стиль</option><option value="concept">Концепт</option><option value="other">Другое</option></select></div>
+          <div><label>Название *</label><input name="character_name" required maxlength="100"></div>
+          <div><label>Источник / референсы</label><input name="source" maxlength="500"></div>
+          <div><label>Статус</label>
+            <select name="status"><option value="requested">Заявлено</option><option value="in_progress">В процессе</option><option value="done">Готово</option></select></div>
+          <div><label>Заметка / причина задержки</label><input name="note"></div>
+          <button class="btn red" type="submit">Добавить</button>
+        </form>
+      </div>
+
+      <div class="panel">
+        <div class="toolbar">
+          <h3 style="margin:0">Заявки</h3>
+          <select id="filter">
+            <option value="">все статусы</option><option value="requested">Заявлено</option><option value="in_progress">В процессе</option>
+            <option value="done">Готово</option><option value="cancelled">Отменено</option>
+          </select>
+        </div>
+        <div id="list"></div>
+      </div>
+    </section>
+
+    <!-- ПОСТЫ -->
+    <section id="posts" hidden>
+      <div class="panel">
+        <h3>Новый пост</h3>
+        <form id="fPost">
+          <div class="inline3">
+            <div><label>Название LoRA *</label><input name="title" required maxlength="120"></div>
+            <div><label>Тип</label>
+              <select name="lora_type"><option value="character">Персонаж</option><option value="style">Стиль</option><option value="concept">Концепт</option><option value="other">Другое</option></select></div>
+            <div><label>Ссылка на Civitai (https://…)</label><input name="civitai_url" type="url" placeholder="https://civitai.com/models/…"></div>
+          </div>
+          <label>Описание поста</label>
+          <textarea name="description" maxlength="3000" placeholder="триггер-слова, рекомендуемый вес, заметки…"></textarea>
+          <label>Изображения (у каждого своё описание)</label>
+          <div id="newImgs"></div>
+          <div class="row" style="justify-content:space-between">
+            <button type="button" class="btn small" id="addImgRow">+ ещё изображение</button>
+            <button class="btn red" type="submit">Опубликовать</button>
+          </div>
+        </form>
+        <div id="postMsg"></div>
+      </div>
+      <div id="postList"></div>
+    </section>
+  </div>
+  <div id="globalMsg"></div>
+</div>
+
+<script src="config.js"></script>
+<script src="api.js"></script>
+<script>
+(function () {
+  const api = window.LoraApi, A = api.admin;
+  const $ = (s) => document.querySelector(s);
+  const $$ = (s) => [...document.querySelectorAll(s)];
+  const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const fmt = (d) => new Date(d).toLocaleString("ru-RU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+  const say = (el, cls, t) => { el.innerHTML = `<div class="msg ${cls}">${esc(t)}</div>`; };
+  const errText = (err) => "Ошибка: " + ((err && err.message) || err);
+  const TYPES = { character: "Персонаж", style: "Стиль", concept: "Концепт", other: "Другое" };
+  const MAX = 5 * 1024 * 1024;
+  const safeUrl = (u) => { u = String(u || "").trim(); return u === "" ? "" : (/^https:\/\//i.test(u) ? u : null); };
+
+  // тема
+  function applyTheme(t) { document.documentElement.dataset.theme = t; $("#themeBtn").textContent = t === "light" ? "☀" : "☾"; }
+  applyTheme(document.documentElement.dataset.theme === "light" ? "light" : "dark");
+  $("#themeBtn").addEventListener("click", () => {
+    const t = document.documentElement.dataset.theme === "light" ? "dark" : "light";
+    try { localStorage.setItem("lora_theme", t); } catch (e) {} applyTheme(t);
+  });
+
+  if (!api.live) $("#demoBanner").hidden = false;
+
+  async function boot() {
+    if (await A.session()) { $("#loginBox").hidden = true; $("#app").hidden = false; $("#logout").hidden = !api.live; refresh(); }
+    else { $("#loginBox").hidden = false; $("#app").hidden = true; $("#logout").hidden = true; }
+  }
+  $("#fLogin").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    try { await A.login(e.target.email.value, e.target.password.value); boot(); }
+    catch (err) { say($("#loginMsg"), "err", err.message); }
+  });
+  $("#logout").addEventListener("click", async () => { await A.logout(); boot(); });
+
+  $$("[data-tab]").forEach((b) => b.addEventListener("click", () => {
+    $$("[data-tab]").forEach((x) => x.classList.toggle("on", x === b));
+    $("#reqs").hidden = b.dataset.tab !== "reqs";
+    $("#posts").hidden = b.dataset.tab !== "posts";
+  }));
+
+  let rows = [], posts = [];
+  async function refresh() {
+    try { rows = await A.list(); drawList(); posts = await api.posts(); drawPosts(); }
+    catch (err) { say($("#globalMsg"), "err", "Ошибка загрузки: " + ((err && err.message) || err)); }
+  }
+  const opt = (v, cur, t) => `<option value="${v}" ${v === cur ? "selected" : ""}>${t}</option>`;
+  const typeOpts = (cur) => Object.entries(TYPES).map(([k, v]) => opt(k, cur, v)).join("");
+
+  // ---------------- ЗАЯВКИ ----------------
+  function drawList() {
+    const f = $("#filter").value;
+    const list = rows.filter((r) => !f || r.status === f);
+    $("#list").innerHTML = list.length ? list.map((r) => `
+      <div class="req" data-id="${esc(r.id)}">
+        <div class="who"><b>${esc(r.character_name)}</b>
+          <small>${esc(TYPES[r.lora_type] || "")}${r.source ? " · " + esc(r.source) : ""}</small>
+          <small>${esc(r.code)} · ${fmt(r.created_at)}${r.requester ? " · " + esc(r.requester) : ""}</small></div>
+        <div><select class="st">
+          ${opt("requested", r.status, "Заявлено")}${opt("in_progress", r.status, "В процессе")}
+          ${opt("done", r.status, "Готово")}${opt("cancelled", r.status, "Отменено")}</select>
+          <select class="ty" style="margin-top:6px">${typeOpts(r.lora_type)}</select></div>
+        <div><input class="nt" placeholder="заметка / причина задержки" value="${esc(r.note || "")}"></div>
+        <div class="btns"><button class="btn small save">Сохранить</button><button class="btn small danger del">Удалить</button></div>
+      </div>`).join("") : `<p class="empty">заявок нет</p>`;
+  }
+  $("#filter").addEventListener("change", drawList);
+
+  $("#list").addEventListener("click", async (e) => {
+    const row = e.target.closest(".req"); if (!row) return;
+    const id = row.dataset.id;
+    try {
+      if (e.target.classList.contains("save")) {
+        await A.update(id, { status: row.querySelector(".st").value, lora_type: row.querySelector(".ty").value, note: row.querySelector(".nt").value.trim() || null });
+        e.target.textContent = "Готово ✓"; setTimeout(() => (e.target.textContent = "Сохранить"), 1200);
+        rows = await A.list();
+      } else if (e.target.classList.contains("del")) {
+        if (!confirm("Удалить заявку насовсем?")) return;
+        await A.remove(id); refresh();
+      }
+    } catch (err) { say($("#globalMsg"), "err", errText(err)); }
+  });
+
+  $("#fAdd").addEventListener("submit", async (e) => {
+    e.preventDefault(); const f = e.target;
+    try {
+      await A.add({ lora_type: f.lora_type.value, character_name: f.character_name.value.trim(), source: f.source.value.trim(), status: f.status.value, note: f.note.value.trim() });
+      f.reset(); refresh();
+    } catch (err) { say($("#globalMsg"), "err", errText(err)); }
+  });
+
+  // ---------------- ПОСТЫ ----------------
+  function imgRow() {
+    const d = document.createElement("div");
+    d.className = "imgrow";
+    d.innerHTML = `<input type="file" accept="image/*"><input class="cap" maxlength="1000" placeholder="описание этого изображения"><button type="button" class="btn small danger rm">×</button>`;
+    d.querySelector(".rm").addEventListener("click", () => d.remove());
+    return d;
+  }
+  $("#newImgs").appendChild(imgRow());
+  $("#addImgRow").addEventListener("click", () => $("#newImgs").appendChild(imgRow()));
+
+  $("#fPost").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const f = e.target, btn = f.querySelector("button.red"), out = $("#postMsg");
+    const civ = safeUrl(f.civitai_url.value);
+    if (civ === null) return say(out, "err", "Ссылка на Civitai должна начинаться с https://");
+    const items = [];
+    for (const row of $$("#newImgs .imgrow")) {
+      const file = row.querySelector('input[type="file"]').files[0];
+      if (!file) continue;
+      if (file.size > MAX) return say(out, "err", `Файл «${file.name}» больше 5 МБ — сожми картинку.`);
+      items.push({ file, caption: row.querySelector(".cap").value.trim() });
+    }
+    btn.disabled = true; say(out, "ok", "Загружаю…");
+    try {
+      await A.postCreate({ title: f.title.value.trim(), lora_type: f.lora_type.value, description: f.description.value.trim(), civitai_url: civ }, items);
+      f.reset(); $("#newImgs").innerHTML = ""; $("#newImgs").appendChild(imgRow());
+      say(out, "ok", "Пост опубликован."); refresh();
+    } catch (err) { say(out, "err", errText(err)); }
+    finally { btn.disabled = false; }
+  });
+
+  function drawPosts() {
+    $("#postList").innerHTML = posts.length ? posts.map((p) => `
+      <div class="panel post" data-id="${esc(p.id)}">
+        <div class="inline3">
+          <div><label>Название</label><input class="pt" value="${esc(p.title)}" maxlength="120"></div>
+          <div><label>Тип</label><select class="ptype">${typeOpts(p.lora_type)}</select></div>
+          <div><label>Civitai</label><input class="pciv" value="${esc(p.civitai_url || "")}" placeholder="https://civitai.com/…"></div>
+        </div>
+        <label>Описание</label>
+        <textarea class="pdesc" maxlength="3000">${esc(p.description || "")}</textarea>
+        <div class="pimgs">${p.images.map((im) => `
+          <div class="pimg" data-iid="${esc(im.id)}">
+            <img src="${esc(im.image_url)}" alt="">
+            <input class="icap" value="${esc(im.caption || "")}" placeholder="описание изображения" maxlength="1000">
+            <button class="btn small isave" type="button">✓</button>
+            <button class="btn small danger idel" type="button">×</button>
+          </div>`).join("")}</div>
+        <div class="imgrow">
+          <input type="file" class="afile" accept="image/*">
+          <input class="acap" placeholder="описание нового изображения" maxlength="1000">
+          <button class="btn small aadd" type="button">+ добавить</button>
+        </div>
+        <div class="row" style="justify-content:space-between;align-items:center">
+          <span style="color:var(--dim)">♥ ${p.hearts || 0}</span>
+          <span><button class="btn small danger pdel" type="button">Удалить пост</button>
+          <button class="btn small red psave" type="button">Сохранить</button></span>
+        </div>
+      </div>`).join("") : `<p class="empty">постов пока нет</p>`;
+  }
+
+  $("#postList").addEventListener("click", async (e) => {
+    const box = e.target.closest(".post"); if (!box) return;
+    const p = posts.find((x) => x.id === box.dataset.id); if (!p) return;
+    const t = e.target;
+    try {
+      if (t.classList.contains("psave")) {
+        const civ = safeUrl(box.querySelector(".pciv").value);
+        if (civ === null) return say($("#globalMsg"), "err", "Ссылка на Civitai должна начинаться с https://");
+        const title = box.querySelector(".pt").value.trim();
+        if (!title) return say($("#globalMsg"), "err", "У поста должно быть название.");
+        await A.postUpdate(p.id, { title, lora_type: box.querySelector(".ptype").value, civitai_url: civ || null, description: box.querySelector(".pdesc").value.trim() || null });
+        t.textContent = "Готово ✓"; setTimeout(() => (t.textContent = "Сохранить"), 1200);
+        posts = await api.posts();
+      } else if (t.classList.contains("pdel")) {
+        if (!confirm("Удалить пост вместе с картинками и сердечками?")) return;
+        await A.postDelete(p); refresh();
+      } else if (t.classList.contains("isave")) {
+        const row = t.closest(".pimg");
+        await A.imageUpdate(row.dataset.iid, row.querySelector(".icap").value.trim());
+        t.textContent = "✓✓"; setTimeout(() => (t.textContent = "✓"), 1000);
+        posts = await api.posts();
+      } else if (t.classList.contains("idel")) {
+        if (!confirm("Удалить это изображение?")) return;
+        const im = p.images.find((x) => x.id === t.closest(".pimg").dataset.iid);
+        await A.imageRemove(im); refresh();
+      } else if (t.classList.contains("aadd")) {
+        const file = box.querySelector(".afile").files[0];
+        if (!file) return say($("#globalMsg"), "err", "Выбери файл картинки.");
+        if (file.size > MAX) return say($("#globalMsg"), "err", "Файл больше 5 МБ — сожми картинку.");
+        t.disabled = true;
+        try {
+          const pos = p.images.length ? Math.max(...p.images.map((i) => i.position)) + 1 : 0;
+          await A.imageAdd(p.id, file, box.querySelector(".acap").value.trim(), pos);
+        } finally { t.disabled = false; }
+        refresh();
+      }
+    } catch (err) { say($("#globalMsg"), "err", errText(err)); }
+  });
+
+  boot();
+})();
+</script>
+</body>
+</html>
