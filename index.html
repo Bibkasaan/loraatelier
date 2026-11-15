@@ -176,11 +176,16 @@
   $("#tg").href = C.TELEGRAM_URL || "#";
 
   // ---- оформление: фон, логотип, тема ----
-  if (C.BG_URL) {
-    const bg = document.createElement("div");
-    bg.className = "bgimg";
-    bg.style.backgroundImage = 'url("' + String(C.BG_URL).replace(/"/g, "%22") + '")';
-    document.body.prepend(bg);
+  const bgEl = document.createElement("div");
+  bgEl.className = "bgimg";
+  document.body.prepend(bgEl);
+  const cssUrl = (u) => 'url("' + String(u).replace(/"/g, "%22") + '")';
+  function applyBg(t) {
+    // тёмная тема: BG_URL как есть; светлая: BG_URL_LIGHT, а если его нет — инвертированный BG_URL
+    const light = t === "light";
+    const url = light ? (C.BG_URL_LIGHT || C.BG_URL) : C.BG_URL;
+    bgEl.classList.toggle("inv", light && !C.BG_URL_LIGHT);
+    bgEl.style.backgroundImage = url ? cssUrl(url) : "none";
   }
   const logoBox = $("#logoBox"), defaultLogo = logoBox.innerHTML;
   function applyTheme(t) {
@@ -188,6 +193,7 @@
     $("#themeBtn").textContent = t === "light" ? "☀" : "☾";
     const url = (t === "light" && C.LOGO_URL_LIGHT) || C.LOGO_URL;
     logoBox.innerHTML = url ? `<img class="logo" src="${esc(url)}" alt="">` : defaultLogo;
+    applyBg(t);
   }
   applyTheme(document.documentElement.dataset.theme === "light" ? "light" : "dark");
   $("#themeBtn").addEventListener("click", () => {

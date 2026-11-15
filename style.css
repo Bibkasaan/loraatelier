@@ -13,7 +13,7 @@
   --ok-bg: rgba(47,123,255,.12); --ok-line: rgba(47,123,255,.45); --ok-ink: #cfe0ff;
   --lace: #cfcac6; --heart-on: #ff4d6d;
   --web: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 200' fill='none' stroke='%23ffffff' stroke-opacity='.2'%3E%3Cpath d='M0 0L200 0M0 0L190 70M0 0L150 150M0 0L70 190M0 0L0 200'/%3E%3Cpath d='M50 0Q40 40 0 50M100 0Q80 80 0 100M150 0Q120 120 0 150M200 0Q160 160 0 200'/%3E%3C/svg%3E");
-  --bgimg-opacity: .16;
+  --bgimg-opacity: 1;
 }
 :root[data-theme="light"] {
   color-scheme: light;
@@ -44,6 +44,7 @@ body {
 }
 
 /* фоновая картинка (необязательная, BG_URL в config.js) */
+.bgimg.inv { filter: invert(1); }
 .bgimg { position: fixed; inset: 0; z-index: 0; pointer-events: none; background: center / cover no-repeat; opacity: var(--bgimg-opacity); }
 
 /* паутина по углам */
@@ -70,7 +71,7 @@ body::after { right: 0; transform: scaleX(-1); }
 .hero { text-align: center; padding: 10px 0 8px; }
 .logobox { min-height: 20px; }
 .heart { width: 190px; height: auto; display: block; margin: 0 auto 4px; color: var(--ink); filter: drop-shadow(0 0 14px rgba(212,50,77,.25)); }
-.logo { max-width: 280px; max-height: 120px; display: block; margin: 0 auto 4px; }
+.logo { max-width: 340px; max-height: 140px; width: auto; height: auto; display: block; margin: 0 auto 4px; }
 .gothic { font-family: var(--gothic); font-weight: 400; }
 h1.gothic { font-size: clamp(2.6rem, 9vw, 4.6rem); line-height: 1; margin: 0; letter-spacing: .5px; text-shadow: 0 0 22px var(--glow); }
 .sub { margin: 6px 0 14px; color: var(--dim); font-style: italic; letter-spacing: .06em; }
