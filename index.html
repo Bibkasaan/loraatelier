@@ -105,6 +105,7 @@
     <textarea name="source" maxlength="500" id="iSrc" rows="3"></textarea>
     <label>Твой ник в Telegram (необязательно)</label>
     <input name="requester" maxlength="80" placeholder="@nick — видно только автору">
+    <div id="secretBox"></div>
     <div class="hp"><label>Не заполнять</label><input name="website" tabindex="-1" autocomplete="off"></div>
     <div id="submitMsg"></div>
     <div class="row">
@@ -242,6 +243,8 @@
     $("#themeBtn").textContent = t === "light" ? "☀" : "☾";
     $("#skinRow").hidden = !alt;
     // гифка создаётся только в закрытой версии, чтобы посторонние её даже не загружали
+    // галочка «секретный реквест» создаётся только в закрытой версии
+    $("#secretBox").innerHTML = alt ? `<label class="check"><input type="checkbox" name="secret"> 🔒 Секретный реквест: увидят только свои</label>` : "";
     $("#skinGif").innerHTML = alt ? `<img class="skin-gif" src="mascot.gif" alt="" onerror="this.remove()">` : "";
     const url = logoUrl(t);
     logoBox.innerHTML = url ? `<img class="logo" src="${esc(url)}" alt="">` : defaultLogo;
@@ -307,7 +310,7 @@
       $("#n-" + st).textContent = list.length;
       $("#c-" + st).innerHTML = list.length ? list.map((r) =>
         `<article class="card">
-          ${badge(r.lora_type || "character")}
+          ${badge(r.lora_type || "character")}${r.audience === "alt" ? `<span class="badge alt">закрыто</span>` : ""}
           <h3>${esc(r.character_name)}</h3>
           ${r.source ? `<p class="src">${esc(r.source)}</p>` : ""}
           ${r.note ? `<p class="note">⚠ ${esc(r.note)}</p>` : ""}
@@ -392,6 +395,14 @@
     finally { b.disabled = false; }
   }, true);
 
+  // таблица: в закрытой версии с секретными заявками, иначе обычная
+  async function loadBoard() {
+    if (altPw) {
+      try { const r = await api.altBoard(altPw); if (r) return r; } catch (e) { /* нет связи или пароль сменили: покажем обычную */ }
+    }
+    return api.board();
+  }
+
   async function loadPosts() {
     if (altPw) {
       try {
@@ -404,7 +415,7 @@
   }
 
   async function load() {
-    try { boardRows = await api.board(); renderBoard(); }
+    try { boardRows = await loadBoard(); renderBoard(); }
     catch (e) { $("#c-requested").innerHTML = `<p class="empty">Не удалось загрузить данные. Обнови страницу.</p>`; }
     try {
       const [p, m] = await Promise.all([loadPosts(), api.myHearts().catch(() => [])]);
@@ -427,6 +438,7 @@
       if (!list) { msg(out, "err", "Не узнаю тебя."); return; }
       clearPw(); altPw = pw; savePw(pw, f.remember.checked);
       posts = list; applySkin(true); renderGallery();
+      try { boardRows = await loadBoard(); renderBoard(); } catch (e) {}
       dlgAlt.close();
     } catch (err) { msg(out, "err", esc(err.message || "Что-то пошло не так. Попробуй позже.")); }
     finally { btn.disabled = false; }
@@ -434,7 +446,9 @@
   $("#altLogout").addEventListener("click", async () => {
     clearPw(); altPw = ""; applySkin(false);
     try { posts = await api.posts(); } catch (e) { posts = []; }
-    renderGallery(); dlgAlt.close();
+    renderGallery();
+    try { boardRows = await loadBoard(); renderBoard(); } catch (e) {}
+    dlgAlt.close();
   });
 
   // ---- форма заявки: подписи зависят от типа ----
@@ -452,9 +466,11 @@
     if (f.website.value) return; // ловушка для ботов
     btn.disabled = true;
     try {
-      const code = await api.submit(f.type.value, f.character.value.trim(), f.source.value.trim(), f.requester.value.trim());
+      const secret = !!(alt && f.elements.secret && f.elements.secret.checked);
+      const code = await api.submit(f.type.value, f.character.value.trim(), f.source.value.trim(), f.requester.value.trim(), secret ? altPw : "");
+      if (!code) { msg(out, "err", "Не узнаю тебя. Войди заново, нажав на логотип."); return; }
       store.set("lora_last_code", code);
-      msg(out, "ok", `Заявка принята! Сохрани код:<span class="code">${esc(code)}</span>Он нужен, чтобы проверить статус или отменить заявку.`);
+      msg(out, "ok", `Заявка принята! Сохрани код:<span class="code">${esc(code)}</span>Он нужен, чтобы проверить статус или отменить заявку.${secret ? "<br>🔒 Реквест секретный: его увидят только свои." : ""}`);
       f.reset(); applyType(); load();
     } catch (err) {
       msg(out, "err", esc(err.message || "Не удалось отправить заявку"));

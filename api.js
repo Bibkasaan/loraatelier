@@ -13,7 +13,7 @@
   const live = !!(SB_URL && SB_KEY && window.supabase);
   const sb = live ? window.supabase.createClient(SB_URL, SB_KEY) : null;
 
-  const DEMO_KEY = "lora_demo_db_v4";
+  const DEMO_KEY = "lora_demo_db_v5";
   const TYPES = ["character", "style", "concept", "other"];
   const AUD = ["all", "alt"];
   const norm = (c) => String(c || "").trim().toUpperCase();
@@ -27,6 +27,7 @@
   const lsGet = (k) => { try { return localStorage.getItem(k) || ""; } catch (e) { return ""; } };
   const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} };
   const aud = (v) => (v === "alt" ? "alt" : "all");
+  const boardRow = (r) => ({ id: r.id, character_name: r.character_name, source: r.source, status: r.status, note: r.note, created_at: r.created_at, updated_at: r.updated_at, lora_type: r.lora_type, audience: aud(r.audience) });
 
   function voterId() {
     let v = lsGet("lora_voter");
@@ -47,7 +48,7 @@
     const t = (h) => new Date(Date.now() - h * 3600e3).toISOString();
     const mk = (i, type, name, src, status, note, h) => ({
       id: "demo" + i, code: "LORA-DEMO000" + i, lora_type: type, character_name: name, source: src,
-      requester: "", status, note, created_at: t(h + 24), updated_at: t(h)
+      requester: "", status, note, audience: "all", created_at: t(h + 24), updated_at: t(h)
     });
     const fake = (n) => Array.from({ length: n }, (_, i) => "seed-" + i);
     const im = (id, post, text, c1, c2, cap, a, pos) => ({ id, post_id: post, image_url: placeholder(text, c1, c2), caption: cap, position: pos, audience: a });
@@ -58,7 +59,8 @@
         mk(3, "character", "Ronova", "Genshin Impact", "in_progress", "Задержка: докупаю время GPU, обучение продолжится завтра", 6),
         mk(4, "style", "Акварельный стиль 90-х", "референсы: примеры в ТГ", "in_progress", "", 20),
         mk(5, "concept", "Витилиго", "пятна депигментации на коже", "requested", "", 40),
-        mk(6, "character", "Alyosha", "Genshin Impact", "requested", "", 12)
+        mk(6, "character", "Alyosha", "Genshin Impact", "requested", "", 12),
+        { ...mk(7, "style", "Секретный стиль (бета)", "референсы только для своих", "requested", "", 5), audience: "alt" }
       ],
       posts: [
         { id: "p1", title: "Linnea", lora_type: "character", audience: "all", description: "Персонаж из Genshin Impact.\nТриггер: linneagenshin, вес 0.8–1.0.", alt_note: "Для своих: рекомендую Euler a, 28 шагов, CFG 5.", civitai_url: "https://civitai.com/", created_at: t(120) },
@@ -121,10 +123,24 @@
 
     // ---------- публичная часть ----------
     async board() {
-      if (!live) return demoDb().requests.filter((r) => r.status !== "cancelled").sort(byUpdated);
+      if (!live) return demoDb().requests.filter((r) => r.status !== "cancelled" && aud(r.audience) === "all").map(boardRow).sort(byUpdated);
       const { data, error } = await sb.from("board").select("*").order("updated_at", { ascending: false });
       if (error) throw error;
       return data;
+    },
+    // таблица закрытой версии: все заявки, включая секретные; неверный пароль -> null
+    async altBoard(password) {
+      if (!live) {
+        const d = demoDb();
+        if (!password || password !== (d.settings && d.settings.alt_password)) return null;
+        return d.requests.filter((r) => r.status !== "cancelled").map(boardRow).sort(byUpdated);
+      }
+      const { data, error } = await sb.rpc("alt_board", { p_password: password });
+      if (error) {
+        if (/locked/.test(error.message)) throw new Error("Слишком много неверных попыток. Подожди 10 минут.");
+        throw error;
+      }
+      return data == null ? null : data.map((r) => ({ ...r, audience: aud(r.audience) })).sort(byUpdated);
     },
     // обычные посты: ничего закрытого
     async posts() {
@@ -187,24 +203,28 @@
       const r = Array.isArray(data) ? data[0] : data;
       return { hearted: !!r.hearted, hearts: r.hearts };
     },
-    async submit(type, character, source, requester) {
+    // altPassword: если передан, заявка отправляется как секретная (видна только закрытой версии); неверный пароль -> null
+    async submit(type, character, source, requester, altPassword) {
       if (!TYPES.includes(type)) type = "character";
+      const secret = !!altPassword;
       if (!live) {
         const d = demoDb();
+        if (secret && altPassword !== (d.settings && d.settings.alt_password)) return null;
         const code = rndCode();
         const now = new Date().toISOString();
         d.requests.push({
           id: uuid(), code, lora_type: type, character_name: character, source, requester,
-          status: "requested", note: "", created_at: now, updated_at: now
+          status: "requested", note: "", audience: secret ? "alt" : "all", created_at: now, updated_at: now
         });
         demoSave(d);
         return code;
       }
-      const { data, error } = await sb.rpc("submit_request", {
-        p_type: type, p_character: character, p_source: source, p_requester: requester
-      });
+      const { data, error } = secret
+        ? await sb.rpc("submit_request_alt", { p_password: altPassword, p_type: type, p_character: character, p_source: source, p_requester: requester })
+        : await sb.rpc("submit_request", { p_type: type, p_character: character, p_source: source, p_requester: requester });
       if (error) {
         if (/rate_limit/.test(error.message)) throw new Error("Слишком много заявок за последний час. Попробуй позже.");
+        if (/locked/.test(error.message)) throw new Error("Слишком много неверных попыток. Подожди 10 минут.");
         throw error;
       }
       return data;
@@ -271,8 +291,8 @@
         const { error } = await sb.from("requests").delete().eq("id", id);
         if (error) throw error;
       },
-      async add({ lora_type, character_name, source, status, note }) {
-        const row = { code: rndCode(), lora_type, character_name, source: source || null, status, note: note || null };
+      async add({ lora_type, character_name, source, status, note, audience }) {
+        const row = { code: rndCode(), lora_type, character_name, source: source || null, status, note: note || null, audience: aud(audience) };
         if (!live) {
           const d = demoDb();
           const now = new Date().toISOString();

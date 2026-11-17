@@ -41,13 +41,15 @@
     <section id="reqs">
       <div class="panel">
         <h3>Добавить карточку вручную</h3>
-        <form id="fAdd" class="inline">
+        <form id="fAdd" class="inline wide">
           <div><label>Тип</label>
             <select name="lora_type"><option value="character">Персонаж</option><option value="style">Стиль</option><option value="concept">Концепт</option><option value="other">Другое</option></select></div>
           <div><label>Название *</label><input name="character_name" required maxlength="100"></div>
           <div><label>Источник / референсы</label><input name="source" maxlength="500"></div>
           <div><label>Статус</label>
             <select name="status"><option value="requested">Заявлено</option><option value="in_progress">В процессе</option><option value="done">Готово</option></select></div>
+          <div><label>Кто видит</label>
+            <select name="audience"><option value="all">Все</option><option value="alt">Только свои</option></select></div>
           <div><label>Заметка / причина задержки</label><input name="note"></div>
           <button class="btn red" type="submit">Добавить</button>
         </form>
@@ -157,6 +159,7 @@
     catch (err) { say($("#globalMsg"), "err", "Ошибка загрузки: " + ((err && err.message) || err)); }
   }
   const opt = (v, cur, t) => `<option value="${v}" ${v === cur ? "selected" : ""}>${t}</option>`;
+  const audOpts = (cur) => opt("all", cur, "Всем") + opt("alt", cur, "Только для своих");
   const typeOpts = (cur) => Object.entries(TYPES).map(([k, v]) => opt(k, cur, v)).join("");
 
   // ---------------- ЗАЯВКИ ----------------
@@ -167,11 +170,12 @@
       <div class="req" data-id="${esc(r.id)}">
         <div class="who"><b>${esc(r.character_name)}</b>
           <small>${esc(TYPES[r.lora_type] || "")}${r.source ? " · " + esc(r.source) : ""}</small>
-          <small>${esc(r.code)} · ${fmt(r.created_at)}${r.requester ? " · " + esc(r.requester) : ""}</small></div>
+          <small>${esc(r.code)} · ${fmt(r.created_at)}${r.requester ? " · " + esc(r.requester) : ""}${r.audience === "alt" ? " · 🔒 секретная" : ""}</small></div>
         <div><select class="st">
           ${opt("requested", r.status, "Заявлено")}${opt("in_progress", r.status, "В процессе")}
           ${opt("done", r.status, "Готово")}${opt("cancelled", r.status, "Отменено")}</select>
-          <select class="ty" style="margin-top:6px">${typeOpts(r.lora_type)}</select></div>
+          <select class="ty" style="margin-top:6px">${typeOpts(r.lora_type)}</select>
+          <select class="rau" style="margin-top:6px">${audOpts(r.audience)}</select></div>
         <div><input class="nt" placeholder="заметка / причина задержки" value="${esc(r.note || "")}"></div>
         <div class="btns"><button class="btn small save">Сохранить</button><button class="btn small danger del">Удалить</button></div>
       </div>`).join("") : `<p class="empty">заявок нет</p>`;
@@ -183,7 +187,7 @@
     const id = row.dataset.id;
     try {
       if (e.target.classList.contains("save")) {
-        await A.update(id, { status: row.querySelector(".st").value, lora_type: row.querySelector(".ty").value, note: row.querySelector(".nt").value.trim() || null });
+        await A.update(id, { status: row.querySelector(".st").value, lora_type: row.querySelector(".ty").value, audience: row.querySelector(".rau").value, note: row.querySelector(".nt").value.trim() || null });
         e.target.textContent = "Готово ✓"; setTimeout(() => (e.target.textContent = "Сохранить"), 1200);
         rows = await A.list();
       } else if (e.target.classList.contains("del")) {
@@ -196,7 +200,7 @@
   $("#fAdd").addEventListener("submit", async (e) => {
     e.preventDefault(); const f = e.target;
     try {
-      await A.add({ lora_type: f.lora_type.value, character_name: f.character_name.value.trim(), source: f.source.value.trim(), status: f.status.value, note: f.note.value.trim() });
+      await A.add({ lora_type: f.lora_type.value, character_name: f.character_name.value.trim(), source: f.source.value.trim(), status: f.status.value, audience: f.audience.value, note: f.note.value.trim() });
       f.reset(); refresh();
     } catch (err) { say($("#globalMsg"), "err", errText(err)); }
   });
@@ -233,7 +237,6 @@
     finally { btn.disabled = false; }
   });
 
-  const audOpts = (cur) => opt("all", cur, "Всем") + opt("alt", cur, "Только для своих");
 
   async function loadPwState() {
     try { $("#pwState").textContent = (await A.altPasswordSet()) ? "Пароль задан. Сам пароль не хранится в открытом виде, его можно только заменить." : "Пароль ещё не задан: войти в закрытую версию пока никто не может."; }

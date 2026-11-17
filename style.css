@@ -295,3 +295,7 @@ html[data-skin="alt"]:not([data-logo="custom"]) .logo { filter: hue-rotate(215de
 
 /* паутинки по углам отключены (чтобы вернуть, удали это правило) */
 body::before, body::after { display: none; }
+
+/* форма добавления заявки в админке: лишнее поле «Кто видит» */
+.inline.wide { grid-template-columns: 1fr 2fr 2fr 1.2fr 1.2fr 3fr auto; }
+@media (max-width: 820px) { .inline.wide { grid-template-columns: 1fr; } }
