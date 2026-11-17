@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>LoRA Atelier — таблица заявок</title>
-<script>try{document.documentElement.dataset.theme=localStorage.getItem('lora_theme')||'dark';}catch(e){}</script>
+<script>try{document.documentElement.dataset.theme=localStorage.getItem('lora_theme')||'dark';}catch(e){}try{if(sessionStorage.getItem('lora_k')||localStorage.getItem('lora_k'))document.documentElement.dataset.skin='alt';}catch(e){}</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,700;1,500&family=UnifrakturCook:wght@700&display=swap" rel="stylesheet">
@@ -26,12 +26,13 @@
           <path d="M78 70 C66 64 52 68 40 78 C50 75 58 76 64 80"/>
         </g>
         <use href="#wing" transform="translate(200 0) scale(-1 1)"/>
-        <path d="M100 86 C70 64 66 42 82 36 C91 33 98 38 100 44 C102 38 109 33 118 36 C134 42 130 64 100 86Z" fill="var(--panel)" stroke="currentColor" stroke-width="1.8"/>
-        <path d="M100 76 C82 61 80 48 88 45 C94 43 99 47 100 51 C101 47 106 43 112 45 C120 48 118 61 100 76Z" stroke="#c4203f" stroke-width="1.2"/>
+        <path d="M100 86 C70 64 66 42 82 36 C91 33 98 38 100 44 C102 38 109 33 118 36 C134 42 130 64 100 86Z" style="fill:var(--panel)" stroke="currentColor" stroke-width="1.8"/>
+        <path d="M100 76 C82 61 80 48 88 45 C94 43 99 47 100 51 C101 47 106 43 112 45 C120 48 118 61 100 76Z" style="stroke:var(--logo-accent)" stroke-width="1.2"/>
       </svg>
     </div>
     <h1 class="gothic">LoRA Atelier</h1>
     <p class="sub">таблица заявок · что заказано, что шьётся, что готово</p>
+    <div class="skin-row" id="skinRow" hidden><span class="skin-pill" id="skinPill">✦ для своих</span><span id="skinGif"></span></div>
     <div class="author">
       <span>Автор: <b class="gothic" id="author">CatatonicPsychosis</b></span>
       <a class="btn ghost" id="tg" href="#" target="_blank" rel="noopener">Зайти в ТГК ✝</a>
@@ -142,6 +143,28 @@
   </form>
 </dialog>
 
+<!-- Кто это? (открывается кликом на логотип) -->
+<dialog id="dlgAlt">
+  <h2 id="altTitle">Кто это?</h2>
+  <form id="fAlt" autocomplete="off">
+    <label>Назови себя</label>
+    <input type="password" name="pw" required autocomplete="off">
+    <label class="check"><input type="checkbox" name="remember"> Запомнить меня</label>
+    <div id="altMsg"></div>
+    <div class="row">
+      <button type="button" class="btn" data-close>Закрыть</button>
+      <button class="btn red" type="submit">Это я</button>
+    </div>
+  </form>
+  <div id="altOut" hidden>
+    <p style="margin:0">Я тебя узнала. Тебе открыто то, чего не видят остальные.</p>
+    <div class="row">
+      <button type="button" class="btn" data-close>Закрыть</button>
+      <button type="button" class="btn danger" id="altLogout">Выйти</button>
+    </div>
+  </div>
+</dialog>
+
 <!-- Пост «Готовая LoRA» -->
 <dialog id="dlgPost" class="wide">
   <div id="postBox"></div>
@@ -171,6 +194,7 @@
     set: (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} }
   };
   const badge = (t) => `<span class="badge ${esc(t)}">${esc(TYPES[t] || TYPES.other)}</span>`;
+  const typeBadges = (p) => badge(p.lora_type) + (p.audience === "alt" ? `<span class="badge alt">закрыто</span>` : "");
 
   $("#author").textContent = C.AUTHOR || "CatatonicPsychosis";
   $("#tg").href = C.TELEGRAM_URL || "#";
@@ -180,26 +204,70 @@
   bgEl.className = "bgimg";
   document.body.prepend(bgEl);
   const cssUrl = (u) => 'url("' + String(u).replace(/"/g, "%22") + '")';
+  // ---- закрытая версия ----
+  const PW_KEY = "lora_k";
+  const readPw = () => { try { return sessionStorage.getItem(PW_KEY) || localStorage.getItem(PW_KEY) || ""; } catch (e) { return ""; } };
+  const savePw = (pw, remember) => { try { sessionStorage.setItem(PW_KEY, pw); if (remember) localStorage.setItem(PW_KEY, pw); } catch (e) {} };
+  const clearPw = () => { try { sessionStorage.removeItem(PW_KEY); localStorage.removeItem(PW_KEY); } catch (e) {} };
+  let altPw = readPw();
+  let alt = !!altPw;   // пока предположение; реальная проверка идёт при загрузке
+
+  const pick = (...list) => list.find(Boolean) || "";
   function applyBg(t) {
-    // тёмная тема: BG_URL как есть; светлая: BG_URL_LIGHT, а если его нет — инвертированный BG_URL
     const light = t === "light";
-    const url = light ? (C.BG_URL_LIGHT || C.BG_URL) : C.BG_URL;
-    bgEl.classList.toggle("inv", light && !C.BG_URL_LIGHT);
+    let url, inv = false;
+    if (light) {
+      url = alt ? pick(C.BG_URL_ALT_LIGHT) : "";
+      if (!url) url = pick(C.BG_URL_LIGHT);
+      if (!url) { url = alt ? pick(C.BG_URL_ALT, C.BG_URL) : pick(C.BG_URL); inv = !!url; }
+    } else {
+      url = alt ? pick(C.BG_URL_ALT, C.BG_URL) : pick(C.BG_URL);
+    }
+    bgEl.classList.toggle("inv", inv);
     bgEl.style.backgroundImage = url ? cssUrl(url) : "none";
   }
   const logoBox = $("#logoBox"), defaultLogo = logoBox.innerHTML;
+  function logoUrl(t) {
+    const light = t === "light";
+    if (alt) {
+      const u = (light && C.LOGO_URL_ALT_LIGHT) || C.LOGO_URL_ALT;
+      if (u) return u;
+    }
+    return (light && C.LOGO_URL_LIGHT) || C.LOGO_URL || "";
+  }
   function applyTheme(t) {
-    document.documentElement.dataset.theme = t;
+    const r = document.documentElement;
+    r.dataset.theme = t;
+    r.dataset.logo = (alt && (C.LOGO_URL_ALT || C.LOGO_URL_ALT_LIGHT)) ? "custom" : "";
     $("#themeBtn").textContent = t === "light" ? "☀" : "☾";
-    const url = (t === "light" && C.LOGO_URL_LIGHT) || C.LOGO_URL;
+    $("#skinRow").hidden = !alt;
+    // гифка создаётся только в закрытой версии, чтобы посторонние её даже не загружали
+    $("#skinGif").innerHTML = alt ? `<img class="skin-gif" src="mascot.gif" alt="" onerror="this.remove()">` : "";
+    const url = logoUrl(t);
     logoBox.innerHTML = url ? `<img class="logo" src="${esc(url)}" alt="">` : defaultLogo;
     applyBg(t);
+  }
+  function applySkin(on) {
+    alt = on;
+    const r = document.documentElement;
+    if (on) r.dataset.skin = "alt"; else delete r.dataset.skin;
+    applyTheme(r.dataset.theme === "light" ? "light" : "dark");
   }
   applyTheme(document.documentElement.dataset.theme === "light" ? "light" : "dark");
   $("#themeBtn").addEventListener("click", () => {
     const t = document.documentElement.dataset.theme === "light" ? "dark" : "light";
     store.set("lora_theme", t); applyTheme(t);
   });
+
+  // клик по логотипу
+  const dlgAlt = $("#dlgAlt");
+  function openAlt() {
+    $("#fAlt").hidden = alt; $("#altOut").hidden = !alt;
+    $("#altTitle").textContent = alt ? "Свои" : "Кто это?";
+    $("#altMsg").innerHTML = ""; $("#fAlt").pw.value = "";
+    dlgAlt.showModal();
+  }
+  logoBox.addEventListener("click", openAlt);
 
   let toastTimer;
   function toast(text) {
@@ -267,7 +335,7 @@
     $("#grid").innerHTML = list.length ? list.map((p) =>
       `<div class="tile" data-id="${esc(p.id)}">
         <div class="ph" style="${cover(p) ? `background-image:url('${esc(cover(p))}')` : ""}">${cover(p) ? "" : "✝"}${p.images.length > 1 ? `<span class="cnt">${p.images.length} фото</span>` : ""}</div>
-        <div class="meta">${badge(p.lora_type)}<b>${esc(p.title)}</b>
+        <div class="meta">${typeBadges(p)}<b>${esc(p.title)}</b>
           <div class="foot">${heartBtn(p)}${civBtn(p)}</div></div>
       </div>`).join("") : `<p class="empty" style="grid-column:1/-1">пока ничего нет</p>`;
     $$("#grid .tile").forEach((t) => t.addEventListener("click", (e) => {
@@ -284,7 +352,7 @@
       `<div class="toprow" data-id="${esc(p.id)}">
         <div class="rank">${i + 1}</div>
         <div class="th" style="${cover(p) ? `background-image:url('${esc(cover(p))}')` : ""}">${cover(p) ? "" : "✝"}</div>
-        <div>${badge(p.lora_type)}<b>${esc(p.title)}</b></div>
+        <div>${typeBadges(p)}<b>${esc(p.title)}</b></div>
         ${heartBtn(p)}
       </div>`).join("") : `<p class="empty">Пока никто не поставил сердечко. Будь первой(ым) ♡</p>`;
     $$("#toplist .toprow").forEach((r) => r.addEventListener("click", (e) => {
@@ -298,11 +366,12 @@
     const p = posts.find((x) => x.id === openId);
     if (!p) return;
     $("#postBox").innerHTML =
-      `${badge(p.lora_type)}<h2>${esc(p.title)}</h2>
+      `${typeBadges(p)}<h2>${esc(p.title)}</h2>
        <div class="post-acts">${heartBtn(p)}${civBtn(p)}</div>
        ${p.description ? `<p class="post-desc">${esc(p.description)}</p>` : ""}
+       ${alt && p.alt_note ? `<div class="alt-note"><b>Только для своих</b><p>${esc(p.alt_note)}</p></div>` : ""}
        <div class="shots">${p.images.map((im) =>
-         `<figure><img src="${esc(im.image_url)}" alt="${esc(im.caption || p.title)}" loading="lazy">${im.caption ? `<figcaption>${esc(im.caption)}</figcaption>` : ""}</figure>`).join("")}</div>`;
+         `<figure>${im.audience === "alt" ? `<span class="badge alt">закрыто</span>` : ""}<img src="${esc(im.image_url)}" alt="${esc(im.caption || p.title)}" loading="lazy">${im.caption ? `<figcaption>${esc(im.caption)}</figcaption>` : ""}</figure>`).join("")}</div>`;
   }
 
   // сердечки: делегирование на весь документ
@@ -323,11 +392,22 @@
     finally { b.disabled = false; }
   }, true);
 
+  async function loadPosts() {
+    if (altPw) {
+      try {
+        const r = await api.altPosts(altPw);
+        if (r) return r;
+        clearPw(); altPw = ""; applySkin(false);   // пароль сменили — выходим
+      } catch (e) { /* нет связи: покажем обычные посты, вход не сбрасываем */ }
+    }
+    return api.posts();
+  }
+
   async function load() {
     try { boardRows = await api.board(); renderBoard(); }
     catch (e) { $("#c-requested").innerHTML = `<p class="empty">Не удалось загрузить данные. Обнови страницу.</p>`; }
     try {
-      const [p, m] = await Promise.all([api.posts(), api.myHearts().catch(() => [])]);
+      const [p, m] = await Promise.all([loadPosts(), api.myHearts().catch(() => [])]);
       posts = p; mine = new Set(m); renderGallery();
     } catch (e) { $("#grid").innerHTML = `<p class="empty" style="grid-column:1/-1">Не удалось загрузить посты.</p>`; }
   }
@@ -335,6 +415,27 @@
   load();
 
   const msg = (el, cls, html) => { el.innerHTML = `<div class="msg ${cls}">${html}</div>`; };
+
+  // ---- вход / выход ----
+  $("#fAlt").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const f = e.target, out = $("#altMsg"), btn = f.querySelector("button.red");
+    const pw = f.pw.value;
+    btn.disabled = true;
+    try {
+      const list = await api.altPosts(pw);
+      if (!list) { msg(out, "err", "Не узнаю тебя."); return; }
+      clearPw(); altPw = pw; savePw(pw, f.remember.checked);
+      posts = list; applySkin(true); renderGallery();
+      dlgAlt.close();
+    } catch (err) { msg(out, "err", esc(err.message || "Что-то пошло не так. Попробуй позже.")); }
+    finally { btn.disabled = false; }
+  });
+  $("#altLogout").addEventListener("click", async () => {
+    clearPw(); altPw = ""; applySkin(false);
+    try { posts = await api.posts(); } catch (e) { posts = []; }
+    renderGallery(); dlgAlt.close();
+  });
 
   // ---- форма заявки: подписи зависят от типа ----
   function applyType() {

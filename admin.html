@@ -68,6 +68,16 @@
     <!-- ПОСТЫ -->
     <section id="posts" hidden>
       <div class="panel">
+        <h3>Закрытая версия</h3>
+        <p class="dim" style="margin:0 0 6px">Заходят по паролю: нужно нажать на логотип сайта. Чтобы закрыть доступ всем, у кого он есть, просто смени пароль.</p>
+        <div id="pwState" class="dim"></div>
+        <form id="fPw" class="inline3" style="grid-template-columns:2fr auto">
+          <div><label>Новый пароль (от 6 символов)</label><input name="pw" type="text" autocomplete="off" minlength="6" required></div>
+          <button class="btn red" type="submit" style="align-self:end">Сохранить пароль</button>
+        </form>
+        <div id="pwMsg"></div>
+      </div>
+      <div class="panel">
         <h3>Новый пост</h3>
         <form id="fPost">
           <div class="inline3">
@@ -76,9 +86,15 @@
               <select name="lora_type"><option value="character">Персонаж</option><option value="style">Стиль</option><option value="concept">Концепт</option><option value="other">Другое</option></select></div>
             <div><label>Ссылка на Civitai (https://…)</label><input name="civitai_url" type="url" placeholder="https://civitai.com/models/…"></div>
           </div>
+          <div class="inline3" style="grid-template-columns:1fr 3fr">
+            <div><label>Кто видит пост</label>
+              <select name="audience"><option value="all">Все</option><option value="alt">Только для своих</option></select></div>
+          </div>
           <label>Описание поста</label>
           <textarea name="description" maxlength="3000" placeholder="триггер-слова, рекомендуемый вес, заметки…"></textarea>
-          <label>Изображения (у каждого своё описание)</label>
+          <label>Текст только для своих (необязательно)</label>
+          <textarea name="alt_note" maxlength="3000" placeholder="этот текст увидят только те, кто вошёл по паролю"></textarea>
+          <label>Изображения (у каждого своё описание и своя видимость)</label>
           <div id="newImgs"></div>
           <div class="row" style="justify-content:space-between">
             <button type="button" class="btn small" id="addImgRow">+ ещё изображение</button>
@@ -137,7 +153,7 @@
 
   let rows = [], posts = [];
   async function refresh() {
-    try { rows = await A.list(); drawList(); posts = await api.posts(); drawPosts(); }
+    try { rows = await A.list(); drawList(); posts = await A.posts(); drawPosts(); loadPwState(); }
     catch (err) { say($("#globalMsg"), "err", "Ошибка загрузки: " + ((err && err.message) || err)); }
   }
   const opt = (v, cur, t) => `<option value="${v}" ${v === cur ? "selected" : ""}>${t}</option>`;
@@ -189,7 +205,7 @@
   function imgRow() {
     const d = document.createElement("div");
     d.className = "imgrow";
-    d.innerHTML = `<input type="file" accept="image/*"><input class="cap" maxlength="1000" placeholder="описание этого изображения"><button type="button" class="btn small danger rm">×</button>`;
+    d.innerHTML = `<input type="file" accept="image/*"><input class="cap" maxlength="1000" placeholder="описание этого изображения"><select class="aud"><option value="all">Всем</option><option value="alt">Только для своих</option></select><button type="button" class="btn small danger rm">×</button>`;
     d.querySelector(".rm").addEventListener("click", () => d.remove());
     return d;
   }
@@ -206,15 +222,28 @@
       const file = row.querySelector('input[type="file"]').files[0];
       if (!file) continue;
       if (file.size > MAX) return say(out, "err", `Файл «${file.name}» больше 5 МБ — сожми картинку.`);
-      items.push({ file, caption: row.querySelector(".cap").value.trim() });
+      items.push({ file, caption: row.querySelector(".cap").value.trim(), audience: row.querySelector(".aud").value });
     }
     btn.disabled = true; say(out, "ok", "Загружаю…");
     try {
-      await A.postCreate({ title: f.title.value.trim(), lora_type: f.lora_type.value, description: f.description.value.trim(), civitai_url: civ }, items);
+      await A.postCreate({ title: f.title.value.trim(), lora_type: f.lora_type.value, audience: f.audience.value, description: f.description.value.trim(), alt_note: f.alt_note.value.trim(), civitai_url: civ }, items);
       f.reset(); $("#newImgs").innerHTML = ""; $("#newImgs").appendChild(imgRow());
       say(out, "ok", "Пост опубликован."); refresh();
     } catch (err) { say(out, "err", errText(err)); }
     finally { btn.disabled = false; }
+  });
+
+  const audOpts = (cur) => opt("all", cur, "Всем") + opt("alt", cur, "Только для своих");
+
+  async function loadPwState() {
+    try { $("#pwState").textContent = (await A.altPasswordSet()) ? "Пароль задан. Сам пароль не хранится в открытом виде, его можно только заменить." : "Пароль ещё не задан: войти в закрытую версию пока никто не может."; }
+    catch (e) { $("#pwState").textContent = ""; }
+  }
+  $("#fPw").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const f = e.target, out = $("#pwMsg");
+    try { await A.setAltPassword(f.pw.value); f.reset(); say(out, "ok", "Пароль сохранён. Старый больше не работает."); loadPwState(); }
+    catch (err) { say(out, "err", errText(err)); }
   });
 
   function drawPosts() {
@@ -225,18 +254,25 @@
           <div><label>Тип</label><select class="ptype">${typeOpts(p.lora_type)}</select></div>
           <div><label>Civitai</label><input class="pciv" value="${esc(p.civitai_url || "")}" placeholder="https://civitai.com/…"></div>
         </div>
+        <div class="inline3" style="grid-template-columns:1fr 3fr">
+          <div><label>Кто видит пост</label><select class="paud">${audOpts(p.audience)}</select></div>
+        </div>
         <label>Описание</label>
         <textarea class="pdesc" maxlength="3000">${esc(p.description || "")}</textarea>
+        <label>Текст только для своих</label>
+        <textarea class="pnote" maxlength="3000" placeholder="виден только тем, кто вошёл по паролю">${esc(p.alt_note || "")}</textarea>
         <div class="pimgs">${p.images.map((im) => `
           <div class="pimg" data-iid="${esc(im.id)}">
             <img src="${esc(im.image_url)}" alt="">
             <input class="icap" value="${esc(im.caption || "")}" placeholder="описание изображения" maxlength="1000">
+            <select class="iaud">${audOpts(im.audience)}</select>
             <button class="btn small isave" type="button">✓</button>
             <button class="btn small danger idel" type="button">×</button>
           </div>`).join("")}</div>
         <div class="imgrow">
           <input type="file" class="afile" accept="image/*">
           <input class="acap" placeholder="описание нового изображения" maxlength="1000">
+          <select class="aaud"><option value="all">Всем</option><option value="alt">Только для своих</option></select>
           <button class="btn small aadd" type="button">+ добавить</button>
         </div>
         <div class="row" style="justify-content:space-between;align-items:center">
@@ -257,17 +293,17 @@
         if (civ === null) return say($("#globalMsg"), "err", "Ссылка на Civitai должна начинаться с https://");
         const title = box.querySelector(".pt").value.trim();
         if (!title) return say($("#globalMsg"), "err", "У поста должно быть название.");
-        await A.postUpdate(p.id, { title, lora_type: box.querySelector(".ptype").value, civitai_url: civ || null, description: box.querySelector(".pdesc").value.trim() || null });
+        await A.postUpdate(p.id, { title, lora_type: box.querySelector(".ptype").value, audience: box.querySelector(".paud").value, civitai_url: civ || null, description: box.querySelector(".pdesc").value.trim() || null, alt_note: box.querySelector(".pnote").value.trim() || null });
         t.textContent = "Готово ✓"; setTimeout(() => (t.textContent = "Сохранить"), 1200);
-        posts = await api.posts();
+        posts = await A.posts();
       } else if (t.classList.contains("pdel")) {
         if (!confirm("Удалить пост вместе с картинками и сердечками?")) return;
         await A.postDelete(p); refresh();
       } else if (t.classList.contains("isave")) {
         const row = t.closest(".pimg");
-        await A.imageUpdate(row.dataset.iid, row.querySelector(".icap").value.trim());
+        await A.imageUpdate(row.dataset.iid, { caption: row.querySelector(".icap").value.trim(), audience: row.querySelector(".iaud").value });
         t.textContent = "✓✓"; setTimeout(() => (t.textContent = "✓"), 1000);
-        posts = await api.posts();
+        posts = await A.posts();
       } else if (t.classList.contains("idel")) {
         if (!confirm("Удалить это изображение?")) return;
         const im = p.images.find((x) => x.id === t.closest(".pimg").dataset.iid);
@@ -279,7 +315,7 @@
         t.disabled = true;
         try {
           const pos = p.images.length ? Math.max(...p.images.map((i) => i.position)) + 1 : 0;
-          await A.imageAdd(p.id, file, box.querySelector(".acap").value.trim(), pos);
+          await A.imageAdd(p.id, file, box.querySelector(".acap").value.trim(), pos, box.querySelector(".aaud").value);
         } finally { t.disabled = false; }
         refresh();
       }
