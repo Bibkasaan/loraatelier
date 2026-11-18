@@ -65,11 +65,13 @@
   <!-- Готовые LoRA -->
   <section id="gallery" hidden>
     <div class="controls">
+      <input type="search" id="gSearch" placeholder="Найти LoRA по названию…" autocomplete="off">
       <select id="gType"></select>
       <select id="gSort">
         <option value="new">Сначала новые</option>
         <option value="hearts">По сердечкам</option>
       </select>
+      <button type="button" class="chip" id="gFav">☆ Избранное</button>
     </div>
     <div class="grid" id="grid"></div>
   </section>
@@ -167,6 +169,11 @@
 </dialog>
 
 <!-- Пост «Готовая LoRA» -->
+<dialog id="dlgZoom" class="wide lightbox">
+  <div id="zoomBox"></div>
+  <div class="row"><button type="button" class="btn" data-close>Закрыть</button></div>
+</dialog>
+
 <dialog id="dlgPost" class="wide">
   <div id="postBox"></div>
   <div class="row"><button type="button" class="btn" data-close>Закрыть</button></div>
@@ -195,7 +202,7 @@
     set: (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} }
   };
   const badge = (t) => `<span class="badge ${esc(t)}">${esc(TYPES[t] || TYPES.other)}</span>`;
-  const typeBadges = (p) => badge(p.lora_type) + (p.audience === "alt" ? `<span class="badge alt">закрыто</span>` : "");
+  const typeBadges = (p) => badge(p.lora_type) + (p.audience === "alt" ? `<span class="badge alt">скрыто</span>` : "");
 
   $("#author").textContent = C.AUTHOR || "CatatonicPsychosis";
   $("#tg").href = C.TELEGRAM_URL || "#";
@@ -214,6 +221,7 @@
   let alt = !!altPw;   // пока предположение; реальная проверка идёт при загрузке
 
   const pick = (...list) => list.find(Boolean) || "";
+  const WHO = String.fromCharCode(73, 100, 97, 105);   // название собирается в коде, а не пишется открытым текстом
   function applyBg(t) {
     const light = t === "light";
     let url, inv = false;
@@ -244,7 +252,7 @@
     $("#skinRow").hidden = !alt;
     // гифка создаётся только в закрытой версии, чтобы посторонние её даже не загружали
     // галочка «секретный реквест» создаётся только в закрытой версии
-    $("#secretBox").innerHTML = alt ? `<label class="check"><input type="checkbox" name="secret"> 🔒 Секретный реквест: увидят только свои</label>` : "";
+    $("#secretBox").innerHTML = alt ? `<label class="check"><input type="checkbox" name="secret"> 🔒 Секретный реквест: увидят только пользователи ${WHO}</label>` : "";
     $("#skinGif").innerHTML = alt ? `<img class="skin-gif" src="mascot.gif" alt="" onerror="this.remove()">` : "";
     const url = logoUrl(t);
     logoBox.innerHTML = url ? `<img class="logo" src="${esc(url)}" alt="">` : defaultLogo;
@@ -310,7 +318,7 @@
       $("#n-" + st).textContent = list.length;
       $("#c-" + st).innerHTML = list.length ? list.map((r) =>
         `<article class="card">
-          ${badge(r.lora_type || "character")}${r.audience === "alt" ? `<span class="badge alt">закрыто</span>` : ""}
+          ${badge(r.lora_type || "character")}${r.audience === "alt" ? `<span class="badge alt">скрыто</span>` : ""}
           <h3>${esc(r.character_name)}</h3>
           ${r.source ? `<p class="src">${esc(r.source)}</p>` : ""}
           ${r.note ? `<p class="note">⚠ ${esc(r.note)}</p>` : ""}
@@ -324,6 +332,16 @@
   $("#gType").innerHTML = [["", "Все типы"], ...Object.entries(TYPES)].map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join("");
   $("#gType").addEventListener("change", renderGallery);
   $("#gSort").addEventListener("change", renderGallery);
+  $("#gSearch").addEventListener("input", renderGallery);
+
+  // избранное хранится в этом браузере
+  const FAV_KEY = "lora_favs";
+  let favs = new Set();
+  try { favs = new Set(JSON.parse(localStorage.getItem(FAV_KEY) || "[]")); } catch (e) {}
+  let favOnly = false;
+  const saveFavs = () => store.set(FAV_KEY, JSON.stringify([...favs]));
+  const favBtn = (p) => `<button class="fav-btn ${favs.has(p.id) ? "on" : ""}" data-fav="${esc(p.id)}" type="button" title="${favs.has(p.id) ? "Убрать из избранного" : "В избранное"}">${favs.has(p.id) ? "★" : "☆"}</button>`;
+  $("#gFav").addEventListener("click", () => { favOnly = !favOnly; renderGallery(); });
 
   const cover = (p) => (p.images && p.images[0] ? p.images[0].image_url : "");
   const heartBtn = (p) => `<button class="heart-btn ${mine.has(p.id) ? "on" : ""}" data-heart="${esc(p.id)}" type="button" title="Поставить сердечко"><span class="h">${mine.has(p.id) ? "♥" : "♡"}</span><span>${p.hearts || 0}</span></button>`;
@@ -331,7 +349,11 @@
 
   function renderGallery() {
     const type = $("#gType").value, sort = $("#gSort").value;
-    let list = posts.filter((p) => !type || p.lora_type === type);
+    const q = $("#gSearch").value.trim().toLowerCase();
+    const favCount = posts.filter((p) => favs.has(p.id)).length;
+    $("#gFav").textContent = (favOnly ? "★" : "☆") + " Избранное" + (favCount ? " (" + favCount + ")" : "");
+    $("#gFav").classList.toggle("on", favOnly);
+    let list = posts.filter((p) => (!type || p.lora_type === type) && (!q || p.title.toLowerCase().includes(q)) && (!favOnly || favs.has(p.id)));
     list = list.slice().sort(sort === "hearts"
       ? (a, b) => (b.hearts - a.hearts) || (new Date(b.created_at) - new Date(a.created_at))
       : (a, b) => new Date(b.created_at) - new Date(a.created_at));
@@ -339,10 +361,10 @@
       `<div class="tile" data-id="${esc(p.id)}">
         <div class="ph" style="${cover(p) ? `background-image:url('${esc(cover(p))}')` : ""}">${cover(p) ? "" : "✝"}${p.images.length > 1 ? `<span class="cnt">${p.images.length} фото</span>` : ""}</div>
         <div class="meta">${typeBadges(p)}<b>${esc(p.title)}</b>
-          <div class="foot">${heartBtn(p)}${civBtn(p)}</div></div>
-      </div>`).join("") : `<p class="empty" style="grid-column:1/-1">пока ничего нет</p>`;
+          <div class="foot">${heartBtn(p)}${favBtn(p)}${civBtn(p)}</div></div>
+      </div>`).join("") : `<p class="empty" style="grid-column:1/-1">${q ? "Ничего не нашлось по такому названию" : favOnly ? "В избранном пока пусто: нажми ☆ на карточке LoRA" : "пока ничего нет"}</p>`;
     $$("#grid .tile").forEach((t) => t.addEventListener("click", (e) => {
-      if (e.target.closest("[data-heart], a")) return;
+      if (e.target.closest("[data-heart], [data-fav], a")) return;
       openPost(t.dataset.id);
     }));
     renderTop();
@@ -364,18 +386,100 @@
     }));
   }
 
-  function openPost(id) { openId = id; renderPost(); $("#dlgPost").showModal(); }
+  // ---- пост: вкладки «Описание» и «Галерея» ----
+  let postTab = "info", gal = [], galMine = new Set(), galState = "loading";
+  function openPost(id) {
+    openId = id; postTab = "info"; gal = []; galMine = new Set(); galState = "loading";
+    renderPost(); $("#dlgPost").showModal(); loadGal(id);
+  }
+  async function loadGal(id) {
+    try {
+      const [g, m] = await Promise.all([api.gallery(id, alt ? altPw : ""), api.myGalleryHearts(id).catch(() => [])]);
+      if (openId !== id) return;
+      gal = g; galMine = new Set(m); galState = "ready";
+    } catch (e) { if (openId !== id) return; gal = []; galState = "error"; }
+    updateGalView();
+  }
+  const gHeartBtn = (g) => `<button class="heart-btn ${galMine.has(g.id) ? "on" : ""}" data-gheart="${esc(g.id)}" type="button" title="Поставить сердечко"><span class="h">${galMine.has(g.id) ? "♥" : "♡"}</span><span>${g.hearts || 0}</span></button>`;
+  function galGridHtml() {
+    if (galState === "loading") return `<p class="empty" style="grid-column:1/-1">Загружаю…</p>`;
+    if (galState === "error") return `<p class="empty" style="grid-column:1/-1">Не удалось загрузить галерею.</p>`;
+    return gal.length ? gal.map((g, i) =>
+      `<figure class="gcard"><img src="${esc(g.image_url)}" alt="${esc(g.caption || "")}" loading="lazy" data-zoom="${i}">
+        ${g.caption ? `<figcaption>${esc(g.caption)}</figcaption>` : ""}<div class="gfoot">${gHeartBtn(g)}</div></figure>`).join("")
+      : `<p class="empty" style="grid-column:1/-1">Галерея пока пуста. Станешь первой(ым)?</p>`;
+  }
+  const galCountText = () => (galState === "ready" ? "(" + gal.length + ")" : "");
+  function updateGalView() {
+    const g = $("#galGrid"), c = $("#galTabCount");
+    if (g) g.innerHTML = galGridHtml();
+    if (c) c.textContent = galCountText();
+  }
   function renderPost() {
     const p = posts.find((x) => x.id === openId);
     if (!p) return;
     $("#postBox").innerHTML =
       `${typeBadges(p)}<h2>${esc(p.title)}</h2>
-       <div class="post-acts">${heartBtn(p)}${civBtn(p)}</div>
-       ${p.description ? `<p class="post-desc">${esc(p.description)}</p>` : ""}
-       ${alt && p.alt_note ? `<div class="alt-note"><b>Только для своих</b><p>${esc(p.alt_note)}</p></div>` : ""}
-       <div class="shots">${p.images.map((im) =>
-         `<figure>${im.audience === "alt" ? `<span class="badge alt">закрыто</span>` : ""}<img src="${esc(im.image_url)}" alt="${esc(im.caption || p.title)}" loading="lazy">${im.caption ? `<figcaption>${esc(im.caption)}</figcaption>` : ""}</figure>`).join("")}</div>`;
+       <div class="post-acts">${heartBtn(p)}${favBtn(p)}${civBtn(p)}</div>
+       <div class="ptabs">
+         <button type="button" data-ptab="info" class="${postTab === "info" ? "on" : ""}">Описание</button>
+         <button type="button" data-ptab="gal" class="${postTab === "gal" ? "on" : ""}">Галерея <span id="galTabCount">${galCountText()}</span></button>
+       </div>
+       <div id="pInfo" ${postTab === "info" ? "" : "hidden"}>
+         ${p.description ? `<p class="post-desc">${esc(p.description)}</p>` : ""}
+         ${alt && p.alt_note ? `<div class="alt-note"><b>Только для своих</b><p>${esc(p.alt_note)}</p></div>` : ""}
+         <div class="shots">${p.images.map((im) =>
+           `<figure>${im.audience === "alt" ? `<span class="badge alt">скрыто</span>` : ""}<img src="${esc(im.image_url)}" alt="${esc(im.caption || p.title)}" loading="lazy">${im.caption ? `<figcaption>${esc(im.caption)}</figcaption>` : ""}</figure>`).join("")}</div>
+       </div>
+       <div id="pGal" ${postTab === "gal" ? "" : "hidden"}>
+         <details class="gal-up"><summary class="btn small">＋ Предложить своё изображение</summary>
+           <form id="fGalUp" autocomplete="off">
+             <p class="dim" style="margin:8px 0 0">Картинка появится в галерее после проверки автором.</p>
+             <label>Картинка *</label>
+             <input type="file" name="file" accept="image/*" required>
+             <label>Подпись (необязательно)</label>
+             <input name="caption" maxlength="300">
+             <label>Твой ник (необязательно, виден только автору)</label>
+             <input name="uploader" maxlength="80">
+             <div class="hp"><label>Не заполнять</label><input name="website" tabindex="-1" autocomplete="off"></div>
+             <div id="galUpMsg"></div>
+             <div class="row"><button class="btn red" type="submit">Отправить на проверку</button></div>
+           </form>
+         </details>
+         <div class="gal-grid" id="galGrid">${galGridHtml()}</div>
+       </div>`;
   }
+
+  // вкладки поста, увеличение картинки, загрузка в галерею
+  $("#postBox").addEventListener("click", (e) => {
+    const t = e.target.closest("[data-ptab]");
+    if (t) {
+      postTab = t.dataset.ptab;
+      $$("#postBox [data-ptab]").forEach((x) => x.classList.toggle("on", x === t));
+      $("#pInfo").hidden = postTab !== "info"; $("#pGal").hidden = postTab !== "gal";
+      return;
+    }
+    const z = e.target.closest("[data-zoom]");
+    if (z) {
+      const g = gal[+z.dataset.zoom];
+      if (!g) return;
+      $("#zoomBox").innerHTML = `<img src="${esc(g.image_url)}" alt="${esc(g.caption || "")}">${g.caption ? `<p class="dim" style="text-align:center;margin:8px 0 0">${esc(g.caption)}</p>` : ""}`;
+      $("#dlgZoom").showModal();
+    }
+  });
+  $("#postBox").addEventListener("submit", async (e) => {
+    if (e.target.id !== "fGalUp") return;
+    e.preventDefault();
+    const f = e.target, out = $("#galUpMsg"), btn = f.querySelector("button.red"), file = f.file.files[0];
+    if (f.website.value || !file) return;
+    btn.disabled = true; msg(out, "ok", "Отправляю…");
+    try {
+      const ok = await api.submitGalleryImage(openId, file, f.caption.value.trim(), f.uploader.value.trim(), alt ? altPw : "");
+      if (ok) { msg(out, "ok", "Спасибо! Картинка появится в галерее после проверки автором."); f.reset(); }
+      else msg(out, "err", "Не удалось отправить. Войди заново, нажав на логотип.");
+    } catch (err) { msg(out, "err", esc(err.message || "Не удалось отправить. Попробуй позже.")); }
+    finally { btn.disabled = false; }
+  });
 
   // сердечки: делегирование на весь документ
   document.addEventListener("click", async (e) => {
@@ -393,6 +497,34 @@
       if ($("#dlgPost").open && openId === id) renderPost();
     } catch (err) { toast("Не удалось поставить сердечко. Попробуй позже."); }
     finally { b.disabled = false; }
+  }, true);
+
+  // сердечки на картинках галереи
+  document.addEventListener("click", async (e) => {
+    const b = e.target.closest("[data-gheart]");
+    if (!b) return;
+    e.stopPropagation();
+    const id = b.dataset.gheart, g = gal.find((x) => x.id === id);
+    if (!g) return;
+    b.disabled = true;
+    try {
+      const r = await api.toggleGalleryHeart(id);
+      g.hearts = r.hearts;
+      r.hearted ? galMine.add(id) : galMine.delete(id);
+      updateGalView();
+    } catch (err) { toast("Не удалось поставить сердечко. Попробуй позже."); }
+    finally { b.disabled = false; }
+  }, true);
+
+  // избранное
+  document.addEventListener("click", (e) => {
+    const b = e.target.closest("[data-fav]");
+    if (!b) return;
+    e.stopPropagation();
+    const id = b.dataset.fav;
+    favs.has(id) ? favs.delete(id) : favs.add(id);
+    saveFavs(); renderGallery();
+    if ($("#dlgPost").open && openId === id) renderPost();
   }, true);
 
   // таблица: в закрытой версии с секретными заявками, иначе обычная
@@ -470,7 +602,7 @@
       const code = await api.submit(f.type.value, f.character.value.trim(), f.source.value.trim(), f.requester.value.trim(), secret ? altPw : "");
       if (!code) { msg(out, "err", "Не узнаю тебя. Войди заново, нажав на логотип."); return; }
       store.set("lora_last_code", code);
-      msg(out, "ok", `Заявка принята! Сохрани код:<span class="code">${esc(code)}</span>Он нужен, чтобы проверить статус или отменить заявку.${secret ? "<br>🔒 Реквест секретный: его увидят только свои." : ""}`);
+      msg(out, "ok", `Заявка принята! Сохрани код:<span class="code">${esc(code)}</span>Он нужен, чтобы проверить статус или отменить заявку.${secret ? `<br>🔒 Реквест секретный: его увидят только пользователи ${WHO}.` : ""}`);
       f.reset(); applyType(); load();
     } catch (err) {
       msg(out, "err", esc(err.message || "Не удалось отправить заявку"));

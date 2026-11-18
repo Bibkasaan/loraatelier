@@ -299,3 +299,33 @@ body::before, body::after { display: none; }
 /* форма добавления заявки в админке: лишнее поле «Кто видит» */
 .inline.wide { grid-template-columns: 1fr 2fr 2fr 1.2fr 1.2fr 3fr auto; }
 @media (max-width: 820px) { .inline.wide { grid-template-columns: 1fr; } }
+
+/* поиск и избранное */
+.controls input[type="search"] { width: min(300px, 100%); }
+.chip.on { color: var(--ink); border-color: var(--red2); background: var(--note-bg); }
+.fav-btn { appearance: none; cursor: pointer; font: 700 1.2rem var(--serif); line-height: 1; color: var(--dim); background: transparent; border: 1px solid var(--line2); border-radius: 20px; padding: 3px 11px; transition: .15s; }
+.fav-btn:hover, .fav-btn.on { color: #e8b84a; border-color: #e8b84a; }
+.fav-btn.on { background: rgba(232,184,74,.12); }
+
+/* вкладки внутри поста и галерея LoRA */
+.ptabs { display: flex; gap: 6px; margin: 14px 0 10px; border-bottom: 1px solid var(--line); }
+.ptabs button { font: 600 1.05rem var(--serif); letter-spacing: .06em; text-transform: uppercase; background: none; color: var(--dim); border: 0; border-bottom: 2px solid transparent; padding: 6px 14px; cursor: pointer; margin-bottom: -1px; }
+.ptabs button.on { color: var(--ink); border-bottom-color: var(--red2); }
+.ptabs button:hover { color: var(--ink); }
+.gal-up { margin: 0 0 14px; }
+.gal-up summary { cursor: pointer; list-style: none; display: inline-block; }
+.gal-up summary::-webkit-details-marker { display: none; }
+.gal-up form { margin-top: 6px; padding: 10px 14px 14px; border: 1px solid var(--line); border-radius: 3px; background: var(--panel2); }
+.gal-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px; }
+.gcard { margin: 0; background: var(--panel2); border: 1px solid var(--line); border-radius: 3px; overflow: hidden; display: flex; flex-direction: column; }
+.gcard img { width: 100%; aspect-ratio: 3 / 4; object-fit: cover; display: block; cursor: zoom-in; background: var(--panel); }
+.gcard figcaption { padding: 6px 9px 0; font-size: .92rem; color: var(--dim); font-style: italic; word-break: break-word; }
+.gcard .gfoot { padding: 7px 9px 9px; margin-top: auto; }
+#zoomBox img { max-width: 100%; max-height: 80vh; display: block; margin: 0 auto; }
+
+/* админка: галерея */
+.gitem { display: grid; grid-template-columns: 72px 1fr auto; gap: 12px; align-items: center; padding: 10px 0; border-top: 1px solid var(--line); }
+.gitem img { width: 72px; height: 90px; object-fit: cover; border: 1px solid var(--line); }
+.gitem .ginfo small { display: block; color: var(--dim); }
+.gitem .btns { display: flex; gap: 6px; flex-wrap: wrap; }
+@media (max-width: 600px) { .gitem { grid-template-columns: 72px 1fr; } .gitem .btns { grid-column: 1 / -1; } }

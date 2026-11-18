@@ -35,6 +35,7 @@
     <nav class="tabs">
       <button class="on" data-tab="reqs">Заявки</button>
       <button data-tab="posts">Готовые LoRA (посты)</button>
+      <button data-tab="galx">Галерея LoRA <span id="galBadge"></span></button>
     </nav>
 
     <!-- ЗАЯВКИ -->
@@ -64,6 +65,29 @@
           </select>
         </div>
         <div id="list"></div>
+      </div>
+    </section>
+
+    <!-- ГАЛЕРЕЯ LoRA -->
+    <section id="galx" hidden>
+      <div class="panel">
+        <h3>На проверке</h3>
+        <p class="dim" style="margin:0 0 6px">Картинки, которые предложили посетители. Одобренные появятся в галерее поста, отклонённые удаляются.</p>
+        <div id="galPending"></div>
+      </div>
+      <div class="panel">
+        <h3>Загрузить в галерею</h3>
+        <form id="fGalAdmin" class="inline3" style="grid-template-columns:2fr 2fr 2fr">
+          <div><label>Пост</label><select name="post" id="galPostSel" required></select></div>
+          <div><label>Картинки (можно несколько)</label><input name="files" type="file" accept="image/*" multiple required></div>
+          <div><label>Подпись (необязательно)</label><input name="caption" maxlength="300"></div>
+          <div style="grid-column:1/-1"><button class="btn red" type="submit">Загрузить в галерею</button></div>
+        </form>
+        <div id="galAdminMsg"></div>
+      </div>
+      <div class="panel">
+        <h3>Опубликованные</h3>
+        <div id="galApproved"></div>
       </div>
     </section>
 
@@ -151,11 +175,12 @@
     $$("[data-tab]").forEach((x) => x.classList.toggle("on", x === b));
     $("#reqs").hidden = b.dataset.tab !== "reqs";
     $("#posts").hidden = b.dataset.tab !== "posts";
+    $("#galx").hidden = b.dataset.tab !== "galx";
   }));
 
-  let rows = [], posts = [];
+  let rows = [], posts = [], gallery = [];
   async function refresh() {
-    try { rows = await A.list(); drawList(); posts = await A.posts(); drawPosts(); loadPwState(); }
+    try { rows = await A.list(); drawList(); posts = await A.posts(); drawPosts(); loadPwState(); gallery = await A.galleryList(); drawGallery(); }
     catch (err) { say($("#globalMsg"), "err", "Ошибка загрузки: " + ((err && err.message) || err)); }
   }
   const opt = (v, cur, t) => `<option value="${v}" ${v === cur ? "selected" : ""}>${t}</option>`;
@@ -323,6 +348,79 @@
         refresh();
       }
     } catch (err) { say($("#globalMsg"), "err", errText(err)); }
+  });
+
+  // ---------------- ГАЛЕРЕЯ LoRA ----------------
+  const postTitle = (id) => { const p = posts.find((x) => x.id === id); return p ? p.title : "(пост удалён)"; };
+  function drawGallery() {
+    const pending = gallery.filter((g) => g.status === "pending");
+    const approved = gallery.filter((g) => g.status === "approved");
+    $("#galBadge").textContent = pending.length ? "(" + pending.length + ")" : "";
+    $("#galPending").innerHTML = pending.length ? pending.map((g) => `
+      <div class="gitem" data-id="${esc(g.id)}">
+        <img src="${esc(g.image_url)}" alt="">
+        <div class="ginfo"><b>${esc(postTitle(g.post_id))}</b>
+          <small>${fmt(g.created_at)}${g.uploader ? " · " + esc(g.uploader) : ""}</small>
+          <input class="gcap" value="${esc(g.caption || "")}" placeholder="подпись" maxlength="300"></div>
+        <div class="btns"><button class="btn small red gok" type="button">Одобрить</button><button class="btn small danger gno" type="button">Отклонить</button></div>
+      </div>`).join("") : `<p class="empty">ничего не ждёт проверки</p>`;
+
+    const by = {};
+    approved.forEach((g) => { (by[g.post_id] = by[g.post_id] || []).push(g); });
+    $("#galApproved").innerHTML = approved.length ? Object.keys(by).map((pid) =>
+      `<h3 style="margin-top:12px">${esc(postTitle(pid))}</h3>` + by[pid].map((g) => `
+      <div class="gitem" data-id="${esc(g.id)}">
+        <img src="${esc(g.image_url)}" alt="">
+        <div class="ginfo"><small>${fmt(g.created_at)} · ♥ ${g.hearts || 0}${g.uploader ? " · " + esc(g.uploader) : ""}</small>
+          <input class="gcap" value="${esc(g.caption || "")}" placeholder="подпись" maxlength="300"></div>
+        <div class="btns"><button class="btn small gsave" type="button">Сохранить</button><button class="btn small danger gdel" type="button">Удалить</button></div>
+      </div>`).join("")).join("") : `<p class="empty">опубликованных картинок пока нет</p>`;
+
+    const sel = $("#galPostSel"), cur = sel.value;
+    sel.innerHTML = posts.map((p) => `<option value="${esc(p.id)}">${esc(p.title)}${p.audience === "alt" ? " (скрытый)" : ""}</option>`).join("");
+    if (cur) sel.value = cur;
+  }
+
+  $("#galx").addEventListener("click", async (e) => {
+    const item = e.target.closest(".gitem"); if (!item) return;
+    const g = gallery.find((x) => x.id === item.dataset.id); if (!g) return;
+    const t = e.target, cap = item.querySelector(".gcap").value.trim();
+    try {
+      if (t.classList.contains("gok")) {
+        if (cap !== (g.caption || "")) await A.galleryUpdate(g.id, cap);
+        await A.galleryApprove(g.id);
+      } else if (t.classList.contains("gno")) {
+        if (!confirm("Отклонить и удалить эту картинку?")) return;
+        await A.galleryDelete(g);
+      } else if (t.classList.contains("gsave")) {
+        await A.galleryUpdate(g.id, cap);
+        t.textContent = "Готово ✓"; setTimeout(() => (t.textContent = "Сохранить"), 1200);
+        gallery = await A.galleryList(); return;
+      } else if (t.classList.contains("gdel")) {
+        if (!confirm("Удалить картинку из галереи?")) return;
+        await A.galleryDelete(g);
+      } else return;
+      gallery = await A.galleryList(); drawGallery();
+    } catch (err) { say($("#globalMsg"), "err", errText(err)); }
+  });
+
+  $("#fGalAdmin").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const f = e.target, btn = f.querySelector("button.red"), out = $("#galAdminMsg");
+    const files = [...f.files.files];
+    if (!files.length) return;
+    btn.disabled = true;
+    try {
+      let n = 0;
+      for (const file of files) {
+        say(out, "ok", "Загружаю " + (n + 1) + " из " + files.length + "…");
+        await A.galleryAdd(f.post.value, file, f.caption.value.trim()); n++;
+      }
+      say(out, "ok", "Загружено: " + n + ".");
+      f.files.value = ""; f.caption.value = "";
+      gallery = await A.galleryList(); drawGallery();
+    } catch (err) { say(out, "err", errText(err)); }
+    finally { btn.disabled = false; }
   });
 
   boot();
