@@ -13,7 +13,7 @@
   const live = !!(SB_URL && SB_KEY && window.supabase);
   const sb = live ? window.supabase.createClient(SB_URL, SB_KEY) : null;
 
-  const DEMO_KEY = "lora_demo_db_v6";
+  const DEMO_KEY = "lora_demo_db_v7";
   const TYPES = ["character", "style", "concept", "other"];
   const AUD = ["all", "alt"];
   const norm = (c) => String(c || "").trim().toUpperCase();
@@ -33,6 +33,46 @@
     let v = lsGet("lora_voter");
     if (!v) { v = uuid(); lsSet("lora_voter", v); }
     return v;
+  }
+
+  // ---------- неделя (для лимита заявок): календарная, с понедельника 00:00 UTC ----------
+  function weekInfo() {
+    const n = new Date();
+    const dow = (n.getUTCDay() + 6) % 7;
+    const start = new Date(Date.UTC(n.getUTCFullYear(), n.getUTCMonth(), n.getUTCDate() - dow));
+    return { start, reset: new Date(start.getTime() + 7 * 864e5) };
+  }
+  const fmtWhen = (iso) => new Date(iso).toLocaleString("ru-RU", { weekday: "long", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" });
+  const demoPid = (voter, key) => {
+    let h = 5381; const t = String(voter) + String(key);
+    for (let i = 0; i < t.length; i++) h = ((h * 33) ^ t.charCodeAt(i)) >>> 0;
+    return h.toString(16).padStart(8, "0").slice(0, 7);
+  };
+  const demoLimit = (d) => { const n = parseInt(d.settings && d.settings.request_limit, 10); return Number.isFinite(n) ? n : 3; };
+  const BAD_WORDS_NAME = /(catatonic|^автор$|^admin$|^админ$)/i;
+
+  // сообщения сервера -> понятный текст
+  function qaErr(error) {
+    const m = String((error && error.message) || error || "");
+    let r = m.match(/banned\|([^|]*)\|([\s\S]*)/);
+    if (r) {
+      const e = new Error("Ты заблокирован(а) " + (r[1] === "forever" ? "навсегда" : "до " + fmtWhen(r[1])) + (r[2] ? ". Причина: " + r[2] : "") + ".");
+      e.banned = true; return e;
+    }
+    const map = {
+      too_fast: "Не так быстро: подожди 15 секунд между сообщениями.",
+      rate_limit: "Слишком много сообщений за последний час. Попробуй позже.",
+      too_long: "Текст слишком длинный.",
+      empty: "Напиши сообщение или добавь картинку.",
+      need_subject: "Укажи тему вопроса.",
+      name_reserved: "Этот ник занят, выбери другой.",
+      thread_not_found: "Этот вопрос больше не существует.",
+      thread_full: "В этом вопросе уже слишком много ответов.",
+      bad_image: "Картинка не загрузилась, попробуй ещё раз.",
+      bad_voter: "Не получилось определить устройство. Обнови страницу."
+    };
+    for (const k in map) if (m.indexOf(k) >= 0) return new Error(map[k]);
+    return error instanceof Error ? error : new Error(m);
   }
 
   // ---------- демо-данные ----------
@@ -75,7 +115,7 @@
         im("i4", "p4", "Mitya · бета", "#2f6fe0", "#0a1a40", "Ранний тест", "alt", 0)
       ],
       hearts: { p1: fake(12), p2: fake(5), p3: fake(8), p4: fake(3) },
-      settings: { alt_password: "secret1" },
+      settings: { alt_password: "secret1", request_limit: 3, qa_premod: false },
       gallery: [
         { id: "g1", post_id: "p1", image_url: placeholder("Linnea · фан-арт 1", "#46506b", "#1c2236"), caption: "Первый тест от подписчицы", uploader: "", status: "approved", created_at: t(40) },
         { id: "g2", post_id: "p1", image_url: placeholder("Linnea · фан-арт 2", "#6b4650", "#2a1620"), caption: "С другим костюмом", uploader: "", status: "approved", created_at: t(30) },
@@ -83,7 +123,24 @@
         { id: "g4", post_id: "p1", image_url: placeholder("ждёт проверки", "#6b6446", "#262214"), caption: "Новая картинка на проверке", uploader: "@guest", status: "pending", created_at: t(2) },
         { id: "g5", post_id: "p4", image_url: placeholder("бета · скрытый пост", "#2f6fe0", "#0a1a40"), caption: "Галерея скрытого поста", uploader: "", status: "approved", created_at: t(6) }
       ],
-      ghearts: { g1: fake(7), g2: fake(2) }
+      ghearts: { g1: fake(7), g2: fake(2) },
+      qa: (() => {
+        const mkq = (num, thread, name, subject, body, img, voter, h, admin) => ({
+          id: "q" + num, num, thread_id: thread, name, subject, body, image_url: img, voter_id: voter, ip_hash: "",
+          poster_id: demoPid(voter, thread || ("q" + num)), is_admin: !!admin, status: "approved",
+          bumped_at: t(h), created_at: t(h)
+        });
+        return [
+          mkq(1, null, "Аня", "Как запустить LoRA в ComfyUI?", "Скачала файл с Civitai, куда его класть? Триггер-слово писать в промпт?\nНа картинке то, что у меня получается.", placeholder("вопрос Ани", "#46506b", "#1c2236"), "seed-a", 30),
+          mkq(2, "q1", "", null, ">>1\nПоложи файл в папку models/loras и подключи нодой Load LoRA.\n>триггер-слово обязательно, да", null, "seed-b", 28),
+          mkq(3, "q1", "Mitya", null, "Вес лучше начинать с 0.8, дальше по вкусу.", null, "seed-c", 26),
+          mkq(4, null, "", "Какой вес ставить для стилей?", "Стили сильно «перебивают» персонажей. С какого веса начинать?", null, "seed-d", 8),
+          mkq(5, "q4", "CatatonicPsychosis", null, "Для стилей обычно хватает 0.5–0.7.", null, "admin", 5, true)
+        ];
+      })(),
+      qaNum: 5,
+      qaBans: [],
+      qaWarn: []
     };
     localStorage.setItem(DEMO_KEY, JSON.stringify(d));
     return d;
@@ -123,6 +180,10 @@
   }
   const galUrl = (path) => sb.storage.from("gallery").getPublicUrl(path).data.publicUrl;
   const mapGal = (g) => ({ ...g, image_url: g.image_url || galUrl(g.image_path), hearts: g.hearts || 0 });
+  const qaUrl = (path) => sb.storage.from("qa").getPublicUrl(path).data.publicUrl;
+  const mapQa = (p) => ({ ...p, image_url: p.image_path ? qaUrl(p.image_path) : null });
+  const qaPublic = (p) => ({ id: p.id, num: p.num, thread_id: p.thread_id, name: p.name, subject: p.subject, body: p.body, image_url: p.image_url || null,
+    poster_id: p.poster_id, is_admin: p.is_admin, created_at: p.created_at, bumped_at: p.bumped_at });
   const newest = (a, b) => new Date(b.created_at) - new Date(a.created_at);
 
   // загрузка файла: Supabase Storage (длинное случайное имя) или data-URL в демо-режиме
@@ -321,25 +382,43 @@
       if (!live) {
         const d = demoDb();
         if (secret && altPassword !== (d.settings && d.settings.alt_password)) return null;
+        const w = weekInfo();
+        const used = d.requests.filter((r) => r.voter_id === voterId() && new Date(r.created_at) >= w.start).length;
+        if (used >= demoLimit(d)) throw new Error("Лимит заявок на этой неделе исчерпан. Лимит сбросится: " + fmtWhen(w.reset) + ".");
         const code = rndCode();
         const now = new Date().toISOString();
         d.requests.push({
-          id: uuid(), code, lora_type: type, character_name: character, source, requester,
+          id: uuid(), voter_id: voterId(), code, lora_type: type, character_name: character, source, requester,
           status: "requested", note: "", audience: secret ? "alt" : "all", created_at: now, updated_at: now
         });
         demoSave(d);
         return code;
       }
       const { data, error } = secret
-        ? await sb.rpc("submit_request_alt", { p_password: altPassword, p_type: type, p_character: character, p_source: source, p_requester: requester })
-        : await sb.rpc("submit_request", { p_type: type, p_character: character, p_source: source, p_requester: requester });
+        ? await sb.rpc("submit_request_alt", { p_password: altPassword, p_type: type, p_character: character, p_source: source, p_requester: requester, p_voter: voterId() })
+        : await sb.rpc("submit_request", { p_type: type, p_character: character, p_source: source, p_requester: requester, p_voter: voterId() });
       if (error) {
+        const wl = String(error.message || "").match(/weekly_limit\|(\S+)/);
+        if (wl) throw new Error("Лимит заявок на этой неделе исчерпан. Лимит сбросится: " + fmtWhen(wl[1]) + ".");
         if (/rate_limit/.test(error.message)) throw new Error("Слишком много заявок за последний час. Попробуй позже.");
         if (/locked/.test(error.message)) throw new Error("Слишком много неверных попыток. Подожди 10 минут.");
         throw error;
       }
       return data;
     },
+    // сколько заявок осталось на этой неделе: { limit, used, reset }
+    async quota() {
+      const v = voterId();
+      if (!live) {
+        const d = demoDb(), w = weekInfo();
+        const used = d.requests.filter((r) => r.voter_id === v && new Date(r.created_at) >= w.start).length;
+        return { limit: demoLimit(d), used, reset: w.reset.toISOString() };
+      }
+      const { data, error } = await sb.rpc("request_quota", { p_voter: v });
+      if (error) throw error;
+      return data;
+    },
+    fmtWhen,
     async check(code) {
       if (!live) return demoDb().requests.find((r) => r.code === norm(code)) || null;
       const { data, error } = await sb.rpc("check_request", { p_code: code });
@@ -361,6 +440,100 @@
       if (error) throw error;
       return data;
     },
+
+    // ---------- Вопрос-ответ ----------
+    async qaThreads() {
+      if (!live) {
+        const d = demoDb();
+        return d.qa.filter((p) => !p.thread_id && p.status === "approved")
+          .map((p) => ({ ...qaPublic(p), reply_count: d.qa.filter((r) => r.thread_id === p.id && r.status === "approved").length }))
+          .sort((a, b) => new Date(b.bumped_at) - new Date(a.bumped_at));
+      }
+      const { data, error } = await sb.from("qa_public").select("*").is("thread_id", null).order("bumped_at", { ascending: false }).limit(60);
+      if (error) throw error;
+      return (data || []).map(mapQa);
+    },
+    async qaThread(id) {
+      if (!live) {
+        const d = demoDb();
+        const op = d.qa.find((p) => p.id === id && !p.thread_id && p.status === "approved");
+        if (!op) return null;
+        const replies = d.qa.filter((r) => r.thread_id === id && r.status === "approved").sort((a, b) => a.num - b.num).map(qaPublic);
+        return { op: qaPublic(op), replies };
+      }
+      const [o, r] = await Promise.all([
+        sb.from("qa_public").select("*").eq("id", id).is("thread_id", null).maybeSingle(),
+        sb.from("qa_public").select("*").eq("thread_id", id).order("created_at", { ascending: true }).limit(400)
+      ]);
+      if (o.error) throw o.error;
+      if (r.error) throw r.error;
+      return o.data ? { op: mapQa(o.data), replies: (r.data || []).map(mapQa) } : null;
+    },
+    // thread = id вопроса или null для нового вопроса; возвращает { num, pending }
+    async qaPost({ thread, name, subject, body, file }) {
+      const v = voterId();
+      if (!live) {
+        const d = demoDb();
+        const ban = d.qaBans.find((b) => b.kind === "voter" && b.value === v && (!b.until || new Date(b.until) > new Date()));
+        if (ban) throw qaErr(new Error("banned|" + (ban.until || "forever") + "|" + (ban.reason || "")));
+        name = String(name || "").trim(); subject = String(subject || "").trim(); body = String(body || "").trim();
+        if (name.length > 40 || subject.length > 100 || body.length > 3000) throw qaErr(new Error("too_long"));
+        if (!body && !file) throw qaErr(new Error("empty"));
+        if (!thread && !subject) throw qaErr(new Error("need_subject"));
+        if (name && BAD_WORDS_NAME.test(name)) throw qaErr(new Error("name_reserved"));
+        if (thread && !d.qa.find((p) => p.id === thread && !p.thread_id && p.status === "approved")) throw qaErr(new Error("thread_not_found"));
+        const img = file ? await fileToDataUrl(await prepareImage(file, 900, 0.8)) : null;
+        const num = (d.qaNum = (d.qaNum || 0) + 1);
+        const id = uuid();
+        const status = d.settings && d.settings.qa_premod ? "pending" : "approved";
+        const now = new Date().toISOString();
+        d.qa.push({ id, num, thread_id: thread || null, name: name || null, subject: thread ? null : subject, body, image_url: img,
+          voter_id: v, ip_hash: "", poster_id: demoPid(v, thread || id), is_admin: false, status, bumped_at: now, created_at: now });
+        if (thread && status === "approved") d.qa.find((p) => p.id === thread).bumped_at = now;
+        demoSave(d);
+        return { num, pending: status === "pending" };
+      }
+      let path = null;
+      if (file) {
+        const blob = await prepareImage(file, 1600, 0.85);
+        path = uuid() + ".jpg";
+        const up = await sb.storage.from("qa").upload(path, blob, { contentType: "image/jpeg" });
+        if (up.error) {
+          if (/row-level security|policy|403|Unauthorized/i.test(up.error.message || "")) throw new Error("Сейчас загружают слишком много картинок. Попробуй позже.");
+          throw up.error;
+        }
+      }
+      const { data, error } = await sb.rpc("qa_post", { p_voter: v, p_thread: thread || null, p_name: name || null, p_subject: subject || null, p_body: body || "", p_image: path });
+      if (error) {
+        if (path) { try { await sb.storage.from("qa").remove([path]); } catch (e) {} }
+        throw qaErr(error);
+      }
+      return data;
+    },
+    // бан и непрочитанные предупреждения этого устройства
+    async qaStatus() {
+      const v = voterId();
+      if (!live) {
+        const d = demoDb();
+        const ban = d.qaBans.find((b) => b.kind === "voter" && b.value === v && (!b.until || new Date(b.until) > new Date()));
+        return { banned: !!ban, until: ban ? (ban.until || "forever") : null, reason: ban ? ban.reason : null,
+          warnings: d.qaWarn.filter((w) => w.voter_id === v && !w.seen_at).map((w) => ({ id: w.id, text: w.text, post_num: w.post_num, created_at: w.created_at })) };
+      }
+      const { data, error } = await sb.rpc("qa_status", { p_voter: v });
+      if (error) throw error;
+      return data;
+    },
+    async qaAck() {
+      const v = voterId();
+      if (!live) {
+        const d = demoDb();
+        d.qaWarn.forEach((w) => { if (w.voter_id === v && !w.seen_at) w.seen_at = new Date().toISOString(); });
+        return demoSave(d);
+      }
+      const { error } = await sb.rpc("qa_ack", { p_voter: v });
+      if (error) throw error;
+    },
+    qaVoter: voterId,
 
     // ---------- админка ----------
     admin: {
@@ -575,6 +748,132 @@
         if (up.error) throw up.error;
         const { error } = await sb.from("gallery_images").insert({ post_id: postId, image_path: path, caption: caption || null, status: "approved" });
         if (error) { try { await sb.storage.from("gallery").remove([path]); } catch (e) {} throw error; }
+      },
+
+      // ---------- Вопрос-ответ: модерация ----------
+      async qaList() {
+        if (!live) return demoDb().qa.slice().sort((a, b) => b.num - a.num);
+        const { data, error } = await sb.from("qa_posts").select("*").order("num", { ascending: false }).limit(400);
+        if (error) throw error;
+        return (data || []).map(mapQa);
+      },
+      async qaApprove(id) {
+        if (!live) { const d = demoDb(); const p = d.qa.find((x) => x.id === id); p.status = "approved"; return demoSave(d); }
+        const { error } = await sb.from("qa_posts").update({ status: "approved" }).eq("id", id);
+        if (error) throw error;
+      },
+      // удалить сообщение (если это вопрос, уходят и все ответы)
+      async qaDelete(post) {
+        if (!live) {
+          const d = demoDb();
+          d.qa = d.qa.filter((x) => x.id !== post.id && x.thread_id !== post.id);
+          return demoSave(d);
+        }
+        const paths = post.image_path ? [post.image_path] : [];
+        if (!post.thread_id) {
+          const r = await sb.from("qa_posts").select("image_path").eq("thread_id", post.id);
+          (r.data || []).forEach((x) => x.image_path && paths.push(x.image_path));
+        }
+        const { error } = await sb.from("qa_posts").delete().eq("id", post.id);
+        if (error) throw error;
+        if (paths.length) { try { await sb.storage.from("qa").remove(paths); } catch (e) {} }
+      },
+      // удалить все сообщения одного анонимного ID
+      async qaDeleteByVoter(voterIdValue) {
+        if (!live) {
+          const d = demoDb();
+          const ids = d.qa.filter((x) => x.voter_id === voterIdValue).map((x) => x.id);
+          d.qa = d.qa.filter((x) => !ids.includes(x.id) && !ids.includes(x.thread_id));
+          return demoSave(d);
+        }
+        const r = await sb.from("qa_posts").select("image_path").eq("voter_id", voterIdValue);
+        const paths = (r.data || []).map((x) => x.image_path).filter(Boolean);
+        const { error } = await sb.from("qa_posts").delete().eq("voter_id", voterIdValue);
+        if (error) throw error;
+        if (paths.length) { try { await sb.storage.from("qa").remove(paths); } catch (e) {} }
+      },
+      // ответ от автора (с плашкой «Автор»)
+      async qaReply(threadId, body, file) {
+        body = String(body || "").trim();
+        if (!body && !file) throw new Error("Напиши ответ или добавь картинку");
+        if (!live) {
+          const d = demoDb();
+          const num = (d.qaNum = (d.qaNum || 0) + 1);
+          const now = new Date().toISOString();
+          d.qa.push({ id: uuid(), num, thread_id: threadId, name: C.AUTHOR || "Автор", subject: null, body,
+            image_url: file ? await fileToDataUrl(await prepareImage(file, 1000, 0.85)) : null,
+            voter_id: "admin", ip_hash: "", poster_id: "admin", is_admin: true, status: "approved", bumped_at: now, created_at: now });
+          d.qa.find((x) => x.id === threadId).bumped_at = now;
+          return demoSave(d);
+        }
+        let path = null;
+        if (file) {
+          const blob = await prepareImage(file, 2000, 0.9);
+          path = uuid() + ".jpg";
+          const up = await sb.storage.from("qa").upload(path, blob, { contentType: "image/jpeg" });
+          if (up.error) throw up.error;
+        }
+        const { error } = await sb.from("qa_posts").insert({ thread_id: threadId, name: C.AUTHOR || "Автор", body, image_path: path,
+          voter_id: "admin", is_admin: true, status: "approved" });
+        if (error) { if (path) { try { await sb.storage.from("qa").remove([path]); } catch (e) {} } throw error; }
+      },
+      async qaWarn(voter, text, postNum) {
+        text = String(text || "").trim();
+        if (!text) throw new Error("Напиши текст предупреждения");
+        if (!live) {
+          const d = demoDb();
+          d.qaWarn.push({ id: Date.now(), voter_id: voter, text, post_num: postNum || null, created_at: new Date().toISOString(), seen_at: null });
+          return demoSave(d);
+        }
+        const { error } = await sb.from("qa_warnings").insert({ voter_id: voter, text: text.slice(0, 500), post_num: postNum || null });
+        if (error) throw error;
+      },
+      // бан по ID устройства (и по адресу, если указан ipHash); days = 0 -> навсегда
+      async qaBan({ voter, ipHash, reason, days, byIp }) {
+        const until = days > 0 ? new Date(Date.now() + days * 864e5).toISOString() : null;
+        const rows = [{ kind: "voter", value: voter, reason: reason || null, until }];
+        if (byIp && ipHash) rows.push({ kind: "ip", value: ipHash, reason: reason || null, until });
+        if (!live) {
+          const d = demoDb();
+          rows.forEach((r) => {
+            d.qaBans = d.qaBans.filter((b) => !(b.kind === r.kind && b.value === r.value));
+            d.qaBans.push({ id: Date.now() + Math.random(), ...r, created_at: new Date().toISOString() });
+          });
+          return demoSave(d);
+        }
+        const { error } = await sb.from("qa_bans").upsert(rows, { onConflict: "kind,value" });
+        if (error) throw error;
+      },
+      async qaBans() {
+        if (!live) return demoDb().qaBans.slice().sort(byCreated);
+        const { data, error } = await sb.from("qa_bans").select("*").order("created_at", { ascending: false });
+        if (error) throw error;
+        return data || [];
+      },
+      async qaUnban(id) {
+        if (!live) { const d = demoDb(); d.qaBans = d.qaBans.filter((b) => b.id !== id); return demoSave(d); }
+        const { error } = await sb.from("qa_bans").delete().eq("id", id);
+        if (error) throw error;
+      },
+      // настройки: "request_weekly_limit" (число), "qa_premod" ("0"/"1")
+      async settingGet(key) {
+        if (!live) {
+          const d = demoDb();
+          return key === "qa_premod" ? (d.settings && d.settings.qa_premod ? "1" : "0") : String(demoLimit(d));
+        }
+        const { data, error } = await sb.rpc("admin_setting_get", { p_key: key });
+        if (error) throw error;
+        return data;
+      },
+      async settingSet(key, value) {
+        if (!live) {
+          const d = demoDb(); d.settings = d.settings || {};
+          if (key === "qa_premod") d.settings.qa_premod = value === "1";
+          else d.settings.request_limit = parseInt(value, 10);
+          return demoSave(d);
+        }
+        const { error } = await sb.rpc("admin_setting_set", { p_key: key, p_value: String(value) });
+        if (error) throw error;
       },
 
       // пароль закрытой версии

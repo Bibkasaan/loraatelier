@@ -36,10 +36,20 @@
       <button class="on" data-tab="reqs">Заявки</button>
       <button data-tab="posts">Готовые LoRA (посты)</button>
       <button data-tab="galx">Галерея LoRA <span id="galBadge"></span></button>
+      <button data-tab="qax">Вопрос-ответ <span id="qaBadge"></span></button>
     </nav>
 
     <!-- ЗАЯВКИ -->
     <section id="reqs">
+      <div class="panel">
+        <h3>Лимит заявок</h3>
+        <form id="fLimit" class="inline" style="grid-template-columns:auto auto 1fr;align-items:end">
+          <div><label>Заявок на одно устройство в неделю</label><input type="number" name="limit" min="0" max="1000" style="width:110px"></div>
+          <button class="btn" type="submit">Сохранить</button>
+          <span class="dim" id="limitMsg"></span>
+        </form>
+        <p class="dim" style="margin:8px 0 0">Неделя считается с понедельника 00:00 (UTC). Отменённые заявки тоже учитываются, чтобы нельзя было отправлять заново.</p>
+      </div>
       <div class="panel">
         <h3>Добавить карточку вручную</h3>
         <form id="fAdd" class="inline wide">
@@ -65,6 +75,38 @@
           </select>
         </div>
         <div id="list"></div>
+      </div>
+    </section>
+
+
+    <!-- ВОПРОС-ОТВЕТ -->
+    <section id="qax" hidden>
+      <div class="panel">
+        <h3>Настройки</h3>
+        <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="qaPremod" style="width:auto"> Сначала проверять сообщения (появляются только после моего «Одобрить»)</label>
+        <p class="dim" style="margin:8px 0 0">Без проверки сообщения видны сразу, как на имиджборде. Тогда удаляй лишнее и банить нарушителей можно из списка ниже.</p>
+      </div>
+      <div class="panel">
+        <h3>Ответить как автор</h3>
+        <form id="fQaReply" class="inline3" style="grid-template-columns:2fr 3fr 2fr">
+          <div><label>Вопрос</label><select name="thread" id="qaThreadSel"></select></div>
+          <div><label>Ответ</label><textarea name="body" rows="3" maxlength="3000"></textarea></div>
+          <div><label>Картинка (необязательно)</label><input type="file" name="file" accept="image/*"></div>
+          <button class="btn red" type="submit">Ответить</button>
+        </form>
+        <div id="qaReplyMsg"></div>
+      </div>
+      <div class="panel" id="qaPendingPanel">
+        <h3>Ждут проверки</h3>
+        <div id="qaPending"></div>
+      </div>
+      <div class="panel">
+        <h3>Блокировки</h3>
+        <div id="qaBans"></div>
+      </div>
+      <div class="panel">
+        <h3>Все сообщения</h3>
+        <div id="qaAll"></div>
       </div>
     </section>
 
@@ -135,6 +177,25 @@
   <div id="globalMsg"></div>
 </div>
 
+
+<dialog id="dlgMod">
+  <h2 id="modTitle">Модерация</h2>
+  <form id="fMod" autocomplete="off">
+    <p class="dim" id="modWho"></p>
+    <label>Текст (предупреждение для пользователя или причина бана)</label>
+    <textarea name="text" rows="3" maxlength="500"></textarea>
+    <label>Срок бана</label>
+    <select name="days"><option value="1">1 день</option><option value="7">7 дней</option><option value="30">30 дней</option><option value="0">навсегда</option></select>
+    <label style="display:flex;gap:8px;align-items:center;margin-top:10px"><input type="checkbox" name="byIp" checked style="width:auto"> Блокировать и по адресу (IP), чтобы нельзя было обойти очисткой браузера</label>
+    <div id="modMsg"></div>
+    <div class="row">
+      <button type="button" class="btn" id="modCancel">Отмена</button>
+      <button type="button" class="btn" id="modWarn">Предупредить</button>
+      <button type="button" class="btn red" id="modBan">Забанить</button>
+    </div>
+  </form>
+</dialog>
+
 <script src="config.js"></script>
 <script src="api.js"></script>
 <script>
@@ -176,11 +237,12 @@
     $("#reqs").hidden = b.dataset.tab !== "reqs";
     $("#posts").hidden = b.dataset.tab !== "posts";
     $("#galx").hidden = b.dataset.tab !== "galx";
+    $("#qax").hidden = b.dataset.tab !== "qax";
   }));
 
-  let rows = [], posts = [], gallery = [];
+  let rows = [], posts = [], gallery = [], qa = [], bans = [];
   async function refresh() {
-    try { rows = await A.list(); drawList(); posts = await A.posts(); drawPosts(); loadPwState(); gallery = await A.galleryList(); drawGallery(); }
+    try { rows = await A.list(); drawList(); posts = await A.posts(); drawPosts(); loadPwState(); gallery = await A.galleryList(); drawGallery(); await loadQa(); }
     catch (err) { say($("#globalMsg"), "err", "Ошибка загрузки: " + ((err && err.message) || err)); }
   }
   const opt = (v, cur, t) => `<option value="${v}" ${v === cur ? "selected" : ""}>${t}</option>`;
@@ -421,6 +483,128 @@
       gallery = await A.galleryList(); drawGallery();
     } catch (err) { say(out, "err", errText(err)); }
     finally { btn.disabled = false; }
+  });
+
+  // ---------------- ЛИМИТ ЗАЯВОК ----------------
+  async function loadLimit() {
+    try { $("#fLimit").limit.value = await A.settingGet("request_weekly_limit"); } catch (e) {}
+  }
+  $("#fLimit").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const out = $("#limitMsg");
+    try { await A.settingSet("request_weekly_limit", String(parseInt(e.target.limit.value, 10) || 0)); out.textContent = "Сохранено ✓"; }
+    catch (err) { out.textContent = errText(err); }
+    setTimeout(() => (out.textContent = ""), 2500);
+  });
+
+  // ---------------- ВОПРОС-ОТВЕТ ----------------
+  async function loadQa() {
+    loadLimit();
+    try { $("#qaPremod").checked = (await A.settingGet("qa_premod")) === "1"; } catch (e) {}
+    qa = await A.qaList(); bans = await A.qaBans(); drawQa();
+  }
+  const shortV = (v) => String(v || "").slice(0, 8);
+  function qaItem(p, byId) {
+    const op = p.thread_id ? byId[p.thread_id] : p;
+    const title = op && op.subject ? op.subject : "";
+    return `<div class="qitem ${p.status === "pending" ? "pending" : ""}" data-id="${esc(p.id)}">
+      <div class="qinfo">
+        <b>№${p.num}</b> · ${p.thread_id ? "ответ в «" + esc(title) + "»" : "<b>вопрос: " + esc(p.subject || "") + "</b>"}
+        <small>· ${esc(p.name || "Anonymous")}${p.is_admin ? " ★ автор" : " · ID " + esc(p.poster_id) + " · устройство " + esc(shortV(p.voter_id))}${p.ip_hash ? " · адрес " + esc(shortV(p.ip_hash)) : ""} · ${fmt(p.created_at)}${p.status === "pending" ? " · ⏳ ждёт проверки" : ""}</small>
+        ${p.body ? `<div class="qtext">${esc(p.body)}</div>` : ""}
+        ${p.image_url ? `<img src="${esc(p.image_url)}" alt="">` : ""}
+      </div>
+      <div class="btns">
+        ${p.status === "pending" ? `<button class="btn red qok">Одобрить</button>` : ""}
+        ${p.is_admin ? "" : `<button class="btn qwarn">Варн</button><button class="btn qban">Бан</button>`}
+        <button class="btn qdel">Удалить</button>
+        ${p.is_admin ? "" : `<button class="btn qall" title="Удалить все сообщения этого устройства">Все с этого ID</button>`}
+      </div>
+    </div>`;
+  }
+  function drawQa() {
+    const byId = {}; qa.forEach((p) => (byId[p.id] = p));
+    const pend = qa.filter((p) => p.status === "pending");
+    $("#qaBadge").textContent = pend.length ? "(" + pend.length + ")" : "";
+    $("#qaPendingPanel").hidden = !pend.length;
+    $("#qaPending").innerHTML = pend.map((p) => qaItem(p, byId)).join("");
+    const approved = qa.filter((p) => p.status === "approved");
+    $("#qaAll").innerHTML = approved.length ? approved.map((p) => qaItem(p, byId)).join("") : `<p class="dim">Пока нет сообщений.</p>`;
+    const cur = $("#qaThreadSel").value;
+    const ops = qa.filter((p) => !p.thread_id && p.status === "approved");
+    $("#qaThreadSel").innerHTML = ops.map((p) => `<option value="${esc(p.id)}">№${p.num} ${esc(p.subject || "")}</option>`).join("") || `<option value="">нет вопросов</option>`;
+    if (cur) $("#qaThreadSel").value = cur;
+    $("#qaBans").innerHTML = bans.length ? bans.map((b) => `<div class="qitem" data-ban="${esc(b.id)}">
+        <div class="qinfo"><b>${b.kind === "ip" ? "Адрес" : "Устройство"}</b> ${esc(shortV(b.value))}
+          <small>· ${b.until ? "до " + fmt(b.until) : "навсегда"}${b.reason ? " · " + esc(b.reason) : ""}${b.until && new Date(b.until) < new Date() ? " · истёк" : ""}</small></div>
+        <div class="btns"><button class="btn qunban">Снять бан</button></div></div>`).join("")
+      : `<p class="dim">Нет блокировок.</p>`;
+  }
+
+  $("#qaPremod").addEventListener("change", async (e) => {
+    try { await A.settingSet("qa_premod", e.target.checked ? "1" : "0"); } catch (err) { say($("#globalMsg"), "err", errText(err)); e.target.checked = !e.target.checked; }
+  });
+
+  $("#fQaReply").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const f = e.target, out = $("#qaReplyMsg"), btn = f.querySelector("button.red");
+    if (!f.thread.value) return say(out, "err", "Сначала нужен вопрос.");
+    btn.disabled = true;
+    try {
+      await A.qaReply(f.thread.value, f.body.value, f.file.files[0] || null);
+      f.body.value = ""; f.file.value = "";
+      say(out, "ok", "Ответ опубликован.");
+      qa = await A.qaList(); drawQa();
+    } catch (err) { say(out, "err", errText(err)); }
+    finally { btn.disabled = false; }
+  });
+
+  // модерация: диалог варна / бана
+  let modTarget = null;
+  function openMod(p) {
+    modTarget = p;
+    $("#modWho").textContent = `Сообщение №${p.num}, ID ${p.poster_id}, устройство ${shortV(p.voter_id)}`;
+    $("#fMod").reset(); $("#modMsg").innerHTML = "";
+    $("#dlgMod").showModal();
+  }
+  $("#modCancel").addEventListener("click", () => $("#dlgMod").close());
+  $("#modWarn").addEventListener("click", async () => {
+    try {
+      await A.qaWarn(modTarget.voter_id, $("#fMod").text.value, modTarget.num);
+      $("#dlgMod").close(); say($("#globalMsg"), "ok", "Предупреждение отправлено: оно появится у пользователя при следующем заходе во вкладку.");
+    } catch (err) { say($("#modMsg"), "err", errText(err)); }
+  });
+  $("#modBan").addEventListener("click", async () => {
+    const f = $("#fMod");
+    try {
+      await A.qaBan({ voter: modTarget.voter_id, ipHash: modTarget.ip_hash, reason: f.text.value.trim(), days: parseInt(f.days.value, 10), byIp: f.byIp.checked });
+      $("#dlgMod").close(); bans = await A.qaBans(); drawQa();
+      say($("#globalMsg"), "ok", "Заблокировано.");
+    } catch (err) { say($("#modMsg"), "err", errText(err)); }
+  });
+
+  $("#qax").addEventListener("click", async (e) => {
+    const t = e.target;
+    const ban = t.closest("[data-ban]");
+    try {
+      if (ban && t.classList.contains("qunban")) {
+        const b = bans.find((x) => String(x.id) === ban.dataset.ban);
+        if (b) { await A.qaUnban(b.id); bans = await A.qaBans(); drawQa(); }
+        return;
+      }
+      const item = t.closest(".qitem[data-id]"); if (!item) return;
+      const p = qa.find((x) => x.id === item.dataset.id); if (!p) return;
+      if (t.classList.contains("qok")) { await A.qaApprove(p.id); }
+      else if (t.classList.contains("qwarn") || t.classList.contains("qban")) { openMod(p); return; }
+      else if (t.classList.contains("qdel")) {
+        if (!confirm(p.thread_id ? "Удалить это сообщение?" : "Удалить вопрос вместе со всеми ответами?")) return;
+        await A.qaDelete(p);
+      } else if (t.classList.contains("qall")) {
+        if (!confirm("Удалить ВСЕ сообщения с этого устройства?")) return;
+        await A.qaDeleteByVoter(p.voter_id);
+      } else return;
+      qa = await A.qaList(); drawQa();
+    } catch (err) { say($("#globalMsg"), "err", errText(err)); }
   });
 
   boot();

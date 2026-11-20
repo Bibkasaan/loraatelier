@@ -329,3 +329,40 @@ body::before, body::after { display: none; }
 .gitem .ginfo small { display: block; color: var(--dim); }
 .gitem .btns { display: flex; gap: 6px; flex-wrap: wrap; }
 @media (max-width: 600px) { .gitem { grid-template-columns: 72px 1fr; } .gitem .btns { grid-column: 1 / -1; } }
+
+/* Вопрос-ответ */
+:root { --green: #8ab85a; --hl: rgba(212,50,77,.16); }
+:root[data-theme="light"] { --green: #3f7d1e; --hl: rgba(142,26,46,.12); }
+:root[data-skin="alt"] { --hl: rgba(79,139,255,.18); }
+.qthread { background: var(--panel); border: 1px solid var(--line); border-radius: 3px; padding: 12px 14px; margin: 0 0 12px; }
+.qreplies { margin-left: 18px; border-left: 2px solid var(--line); padding-left: 12px; }
+.qpost { padding: 8px 10px; margin: 0 0 8px; border-radius: 3px; transition: background .4s; }
+.qreplies .qpost { background: var(--panel2); border: 1px solid var(--line); }
+.qpost.adm { border-color: var(--red2); }
+.qpost.hl { background: var(--hl); }
+.qhead { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; font-size: .95rem; margin: 0 0 6px; }
+.qsub { font-size: 1.1rem; color: var(--accent-text); }
+.qname { font-weight: 700; color: var(--green); }
+.qid { font-family: ui-monospace, Menlo, monospace; font-size: .85rem; color: var(--dim); background: var(--panel2); border: 1px solid var(--line); border-radius: 3px; padding: 0 5px; }
+.qstar { font-weight: 700; color: var(--red2); letter-spacing: .04em; }
+.qyou { color: var(--dim); font-style: italic; }
+.qnum { color: var(--dim); text-decoration: none; }
+.qnum:hover { color: var(--red2); }
+.qmain { display: flex; gap: 12px; align-items: flex-start; }
+.qimg { max-width: 150px; max-height: 150px; object-fit: cover; border: 1px solid var(--line); cursor: zoom-in; flex: none; }
+.qbody { white-space: pre-wrap; word-break: break-word; min-width: 0; }
+.qbody.clamp { display: -webkit-box; -webkit-line-clamp: 6; -webkit-box-orient: vertical; overflow: hidden; }
+.qbody .green { color: var(--green); }
+.qref { color: var(--red2); text-decoration: none; }
+.qref:hover { text-decoration: underline; }
+.qfoot { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 6px; }
+@media (max-width: 600px) { .qmain { flex-direction: column; } .qreplies { margin-left: 6px; padding-left: 8px; } }
+
+/* админка: Вопрос-ответ */
+.qitem { display: grid; grid-template-columns: 1fr auto; gap: 10px; padding: 10px 0; border-top: 1px solid var(--line); align-items: start; }
+.qitem .qinfo small { color: var(--dim); }
+.qitem .qtext { white-space: pre-wrap; word-break: break-word; margin-top: 4px; }
+.qitem img { max-width: 110px; max-height: 110px; object-fit: cover; border: 1px solid var(--line); margin-top: 6px; display: block; }
+.qitem .btns { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; max-width: 260px; }
+.qitem.pending { background: var(--note-bg); }
+@media (max-width: 700px) { .qitem { grid-template-columns: 1fr; } .qitem .btns { justify-content: flex-start; max-width: none; } }

@@ -50,6 +50,7 @@
     <button class="on" data-tab="board">Таблица</button>
     <button data-tab="gallery">Готовые LoRA</button>
     <button data-tab="top">Топ ♥</button>
+    <button data-tab="qa">Вопрос-ответ</button>
   </nav>
 
   <!-- Таблица заявок -->
@@ -82,6 +83,17 @@
     <div class="toplist" id="toplist"></div>
   </section>
 
+  <!-- Вопрос-ответ -->
+  <section id="qa" hidden>
+    <div id="qaNote"></div>
+    <div id="qaListView">
+      <p class="sub" style="text-align:center;margin-top:0">спрашивай и отвечай без регистрации: можно придумать любой ник, а у каждого сообщения есть анонимный ID</p>
+      <div class="controls"><button type="button" class="btn red" id="qaNew">Задать вопрос</button></div>
+      <div id="qaThreads"></div>
+    </div>
+    <div id="qaThreadView" hidden></div>
+  </section>
+
   <footer>
     <div class="lace"></div>
     <span class="gothic">CatatonicPsychosis</span><br>
@@ -108,6 +120,7 @@
     <label>Твой ник в Telegram (необязательно)</label>
     <input name="requester" maxlength="80" placeholder="@nick — видно только автору">
     <div id="secretBox"></div>
+    <p id="quotaLine" class="dim" style="margin:10px 0 0" hidden></p>
     <div class="hp"><label>Не заполнять</label><input name="website" tabindex="-1" autocomplete="off"></div>
     <div id="submitMsg"></div>
     <div class="row">
@@ -172,6 +185,29 @@
 <dialog id="dlgZoom" class="wide lightbox">
   <div id="zoomBox"></div>
   <div class="row"><button type="button" class="btn" data-close>Закрыть</button></div>
+</dialog>
+
+<dialog id="dlgQa" class="wide">
+  <h2 id="qaFormTitle">Новый вопрос</h2>
+  <form id="fQa" autocomplete="off">
+    <label>Ник (необязательно)</label>
+    <input name="name" maxlength="40" placeholder="Anonymous">
+    <div id="qaSubjRow">
+      <label>Тема вопроса *</label>
+      <input name="subject" maxlength="100">
+    </div>
+    <label>Сообщение</label>
+    <textarea name="body" maxlength="3000" rows="6"></textarea>
+    <label>Картинка (необязательно)</label>
+    <input type="file" name="file" accept="image/*">
+    <div class="hp"><label>Не заполнять</label><input name="website" tabindex="-1" autocomplete="off"></div>
+    <p class="dim" style="font-size:.9em;margin:10px 0 0">Регистрация не нужна. К сообщению привязывается анонимный ID устройства: автор может выдать предупреждение или заблокировать его. Строка с «&gt;» в начале станет зелёной, «&gt;&gt;12» ссылается на сообщение №12.</p>
+    <div id="qaFormMsg"></div>
+    <div class="row">
+      <button type="button" class="btn" data-close>Отмена</button>
+      <button type="submit" class="btn red">Отправить</button>
+    </div>
+  </form>
 </dialog>
 
 <dialog id="dlgPost" class="wide">
@@ -301,7 +337,8 @@
   // ---- вкладки ----
   $$("[data-tab]").forEach((b) => b.addEventListener("click", () => {
     $$("[data-tab]").forEach((x) => x.classList.toggle("on", x === b));
-    ["board", "gallery", "top"].forEach((id) => ($("#" + id).hidden = b.dataset.tab !== id));
+    ["board", "gallery", "top", "qa"].forEach((id) => ($("#" + id).hidden = b.dataset.tab !== id));
+    if (b.dataset.tab === "qa") loadQa();
   }));
 
   // ---- таблица ----
@@ -603,7 +640,7 @@
       if (!code) { msg(out, "err", "Не узнаю тебя. Войди заново, нажав на логотип."); return; }
       store.set("lora_last_code", code);
       msg(out, "ok", `Заявка принята! Сохрани код:<span class="code">${esc(code)}</span>Он нужен, чтобы проверить статус или отменить заявку.${secret ? `<br>🔒 Реквест секретный: его увидят только пользователи ${WHO}.` : ""}`);
-      f.reset(); applyType(); load();
+      f.reset(); applyType(); load(); updateQuota();
     } catch (err) {
       msg(out, "err", esc(err.message || "Не удалось отправить заявку"));
     } finally { btn.disabled = false; }
@@ -633,6 +670,148 @@
       else if (res === "not_cancellable") msg(out, "err", "Эту заявку уже взяли в работу или выполнили — отменить нельзя. Напиши автору в ТГ.");
       else msg(out, "err", "Заявка с таким кодом не найдена.");
     } catch (err) { msg(out, "err", "Не удалось отменить заявку. Попробуй позже."); }
+  });
+
+  // ---- недельный лимит заявок ----
+  async function updateQuota() {
+    const el = $("#quotaLine");
+    try {
+      const q = await api.quota();
+      const left = Math.max(0, q.limit - q.used);
+      el.hidden = false;
+      el.textContent = left > 0
+        ? `На этой неделе осталось заявок: ${left} из ${q.limit} (лимит обновляется по понедельникам).`
+        : `Лимит заявок на этой неделе исчерпан. Он сбросится: ${api.fmtWhen(q.reset)}.`;
+    } catch (e) { el.hidden = true; }
+  }
+  $$('[data-open="dlgSubmit"]').forEach((b) => b.addEventListener("click", updateQuota));
+
+  // ---- Вопрос-ответ ----
+  const qaDT = (d) => new Date(d).toLocaleString("ru-RU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+  const mineGet = () => { try { return new Set(JSON.parse(store.get("lora_qa_mine") || "[]")); } catch (e) { return new Set(); } };
+  const mineAdd = (n) => { const m = mineGet(); m.add(n); store.set("lora_qa_mine", JSON.stringify([...m].slice(-300))); };
+  const qaBody = (t) => esc(t).split("\n").map((line) => {
+    const l = line.replace(/&gt;&gt;(\d+)/g, '<a href="#" class="qref" data-ref="$1">&gt;&gt;$1</a>');
+    return /^&gt;(?!&gt;)/.test(line) ? `<span class="green">${l}</span>` : l;
+  }).join("\n");
+  let qaOpen = null, qaThreadId = null;
+
+  function qaPostHtml(p, mine, inList) {
+    return `<article class="qpost ${p.is_admin ? "adm" : ""}" data-num="${p.num}">
+      <div class="qhead">
+        ${p.subject ? `<b class="qsub">${esc(p.subject)}</b>` : ""}
+        <span class="qname">${esc(p.name || "Anonymous")}</span>
+        ${p.is_admin ? `<span class="qstar">★ автор</span>` : `<span class="qid" title="Анонимный ID в этом вопросе">ID: ${esc(p.poster_id)}</span>`}
+        ${mine.has(p.num) ? `<span class="qyou">(ты)</span>` : ""}
+        <span class="dim">${esc(qaDT(p.created_at))}</span>
+        ${inList ? `<span class="dim">№${p.num}</span>` : `<a href="#" class="qnum" data-reply="${p.num}" title="Ответить на это сообщение">№${p.num}</a>`}
+      </div>
+      <div class="qmain">
+        ${p.image_url ? `<img class="qimg" src="${esc(p.image_url)}" alt="" loading="lazy" data-qzoom>` : ""}
+        <div class="qbody ${inList ? "clamp" : ""}">${qaBody(p.body || "")}</div>
+      </div>
+    </article>`;
+  }
+
+  async function qaStatusNote() {
+    const box = $("#qaNote");
+    try {
+      const st = await api.qaStatus();
+      let h = "";
+      if (st.banned) h += `<div class="msg err">Ты заблокирован(а) ${st.until === "forever" ? "навсегда" : "до " + esc(api.fmtWhen(st.until))}.${st.reason ? " Причина: " + esc(st.reason) : ""}</div>`;
+      (st.warnings || []).forEach((w) => { h += `<div class="msg err">⚠ Предупреждение от автора${w.post_num ? " (к сообщению №" + w.post_num + ")" : ""}: ${esc(w.text)}</div>`; });
+      if ((st.warnings || []).length) h += `<div class="row" style="justify-content:flex-start;margin:0 0 10px"><button type="button" class="btn" id="qaAck">Понятно</button></div>`;
+      box.innerHTML = h;
+    } catch (e) { box.innerHTML = ""; }
+  }
+  $("#qaNote").addEventListener("click", async (e) => {
+    if (e.target.id !== "qaAck") return;
+    try { await api.qaAck(); } catch (err) {}
+    qaStatusNote();
+  });
+
+  async function loadQa() {
+    qaStatusNote();
+    if (qaThreadId) return openQaThread(qaThreadId);
+    $("#qaListView").hidden = false; $("#qaThreadView").hidden = true;
+    const box = $("#qaThreads");
+    try {
+      const list = await api.qaThreads();
+      const mine = mineGet();
+      box.innerHTML = list.length ? list.map((p) => `<div class="qthread">${qaPostHtml(p, mine, true)}
+        <div class="qfoot"><span class="dim">ответов: ${p.reply_count || 0} · последнее: ${esc(qaDT(p.bumped_at))}</span>
+          <button type="button" class="btn" data-thread="${esc(p.id)}">Открыть</button></div></div>`).join("")
+        : `<div class="empty">Пока вопросов нет. Задай первый!</div>`;
+    } catch (err) { box.innerHTML = `<div class="empty">Не удалось загрузить вопросы. Попробуй позже.</div>`; }
+  }
+
+  async function openQaThread(id) {
+    try {
+      const t = await api.qaThread(id);
+      if (!t) { qaThreadId = null; toast("Этот вопрос больше не существует."); return loadQa(); }
+      qaThreadId = id;
+      const mine = mineGet();
+      $("#qaListView").hidden = true;
+      const v = $("#qaThreadView"); v.hidden = false;
+      v.innerHTML = `<div class="row" style="justify-content:space-between;margin:0 0 10px">
+          <button type="button" class="btn" id="qaBack">← ко всем вопросам</button>
+          <button type="button" class="btn red" data-reply="">Ответить</button></div>
+        <div class="qthread">${qaPostHtml(t.op, mine, false)}</div>
+        <div class="qreplies">${t.replies.map((r) => qaPostHtml(r, mine, false)).join("") || `<div class="empty">Ответов пока нет.</div>`}</div>`;
+      window.scrollTo({ top: 0 });
+    } catch (err) { toast("Не удалось открыть вопрос."); }
+  }
+
+  function openQaForm(threadId, prefill) {
+    const f = $("#fQa");
+    f.dataset.thread = threadId || "";
+    $("#qaFormTitle").textContent = threadId ? "Ответ" : "Новый вопрос";
+    $("#qaSubjRow").hidden = !!threadId;
+    f.subject.required = !threadId;
+    f.name.value = store.get("lora_qa_name");
+    if (prefill) f.body.value = (f.body.value ? f.body.value + "\n" : "") + prefill;
+    $("#qaFormMsg").innerHTML = "";
+    $("#dlgQa").showModal();
+    (prefill ? f.body : (threadId ? f.body : f.subject)).focus();
+  }
+  $("#qaNew").addEventListener("click", () => openQaForm(null, ""));
+
+  $("#qa").addEventListener("click", (e) => {
+    const t = e.target;
+    const th = t.closest("[data-thread]");
+    if (th) { openQaThread(th.dataset.thread); return; }
+    if (t.id === "qaBack") { qaThreadId = null; loadQa(); return; }
+    const rp = t.closest("[data-reply]");
+    if (rp) { e.preventDefault(); openQaForm(qaThreadId, rp.dataset.reply ? ">>" + rp.dataset.reply + "\n" : ""); return; }
+    const ref = t.closest(".qref");
+    if (ref) {
+      e.preventDefault();
+      const target = $("#qaThreadView").querySelector(`.qpost[data-num="${ref.dataset.ref}"]`);
+      if (target) { target.scrollIntoView({ behavior: "smooth", block: "center" }); target.classList.add("hl"); setTimeout(() => target.classList.remove("hl"), 1600); }
+      return;
+    }
+    const z = t.closest("[data-qzoom]");
+    if (z) { $("#zoomBox").innerHTML = `<img src="${esc(z.getAttribute("src"))}" alt="">`; $("#dlgZoom").showModal(); }
+  });
+
+  $("#fQa").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const f = e.target, out = $("#qaFormMsg"), btn = f.querySelector("button.red");
+    if (f.website.value) return; // ловушка для ботов
+    const thread = f.dataset.thread || null;
+    btn.disabled = true;
+    try {
+      const r = await api.qaPost({ thread, name: f.name.value, subject: f.subject.value, body: f.body.value, file: f.file.files[0] || null });
+      store.set("lora_qa_name", f.name.value.trim());
+      if (r && r.num) mineAdd(r.num);
+      f.body.value = ""; f.subject.value = ""; f.file.value = "";
+      if (r && r.pending) { msg(out, "ok", "Спасибо! Сообщение появится после проверки автором."); }
+      else $("#dlgQa").close();
+      loadQa();
+    } catch (err) {
+      msg(out, "err", esc(err.message || "Не удалось отправить"));
+      if (err.banned) qaStatusNote();
+    } finally { btn.disabled = false; }
   });
 })();
 </script>
