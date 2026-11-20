@@ -200,6 +200,7 @@
     <textarea name="body" maxlength="3000" rows="6"></textarea>
     <label>Картинка (необязательно)</label>
     <input type="file" name="file" accept="image/*">
+    <div id="qaSecretRow"></div>
     <div class="hp"><label>Не заполнять</label><input name="website" tabindex="-1" autocomplete="off"></div>
     <p class="dim" style="font-size:.9em;margin:10px 0 0">Регистрация не нужна. К сообщению привязывается анонимный ID устройства: автор может выдать предупреждение или заблокировать его. Строка с «&gt;» в начале станет зелёной, «&gt;&gt;12» ссылается на сообщение №12.</p>
     <div id="qaFormMsg"></div>
@@ -299,6 +300,7 @@
     const r = document.documentElement;
     if (on) r.dataset.skin = "alt"; else delete r.dataset.skin;
     applyTheme(r.dataset.theme === "light" ? "light" : "dark");
+    document.dispatchEvent(new Event("skinchange"));
   }
   applyTheme(document.documentElement.dataset.theme === "light" ? "light" : "dark");
   $("#themeBtn").addEventListener("click", () => {
@@ -700,6 +702,7 @@
     return `<article class="qpost ${p.is_admin ? "adm" : ""}" data-num="${p.num}">
       <div class="qhead">
         ${p.subject ? `<b class="qsub">${esc(p.subject)}</b>` : ""}
+        ${p.audience === "alt" && !p.thread_id ? `<span class="badge alt">скрыто</span>` : ""}
         <span class="qname">${esc(p.name || "Anonymous")}</span>
         ${p.is_admin ? `<span class="qstar">★ автор</span>` : `<span class="qid" title="Анонимный ID в этом вопросе">ID: ${esc(p.poster_id)}</span>`}
         ${mine.has(p.num) ? `<span class="qyou">(ты)</span>` : ""}
@@ -736,7 +739,8 @@
     $("#qaListView").hidden = false; $("#qaThreadView").hidden = true;
     const box = $("#qaThreads");
     try {
-      const list = await api.qaThreads();
+      let list = alt ? await api.altQaThreads(altPw).catch(() => null) : null;
+      if (!list) list = await api.qaThreads();
       const mine = mineGet();
       box.innerHTML = list.length ? list.map((p) => `<div class="qthread">${qaPostHtml(p, mine, true)}
         <div class="qfoot"><span class="dim">ответов: ${p.reply_count || 0} · последнее: ${esc(qaDT(p.bumped_at))}</span>
@@ -747,7 +751,8 @@
 
   async function openQaThread(id) {
     try {
-      const t = await api.qaThread(id);
+      let t = alt ? await api.altQaThread(altPw, id).catch(() => null) : null;
+      if (!t || !t.op) t = await api.qaThread(id);
       if (!t) { qaThreadId = null; toast("Этот вопрос больше не существует."); return loadQa(); }
       qaThreadId = id;
       const mine = mineGet();
@@ -767,6 +772,7 @@
     f.dataset.thread = threadId || "";
     $("#qaFormTitle").textContent = threadId ? "Ответ" : "Новый вопрос";
     $("#qaSubjRow").hidden = !!threadId;
+    $("#qaSecretRow").innerHTML = alt && !threadId ? `<label class="check" style="margin-top:10px"><input type="checkbox" name="secret"> 🔒 Секретный вопрос: увидят только пользователи ${WHO}</label>` : "";
     f.subject.required = !threadId;
     f.name.value = store.get("lora_qa_name");
     if (prefill) f.body.value = (f.body.value ? f.body.value + "\n" : "") + prefill;
@@ -775,6 +781,7 @@
     (prefill ? f.body : (threadId ? f.body : f.subject)).focus();
   }
   $("#qaNew").addEventListener("click", () => openQaForm(null, ""));
+  document.addEventListener("skinchange", () => { if (!$("#qa").hidden) { qaThreadId = null; loadQa(); } });
 
   $("#qa").addEventListener("click", (e) => {
     const t = e.target;
@@ -801,7 +808,8 @@
     const thread = f.dataset.thread || null;
     btn.disabled = true;
     try {
-      const r = await api.qaPost({ thread, name: f.name.value, subject: f.subject.value, body: f.body.value, file: f.file.files[0] || null });
+      const r = await api.qaPost({ thread, name: f.name.value, subject: f.subject.value, body: f.body.value, file: f.file.files[0] || null,
+        secret: !!(alt && !thread && f.elements.secret && f.elements.secret.checked), password: alt ? altPw : "" });
       store.set("lora_qa_name", f.name.value.trim());
       if (r && r.num) mineAdd(r.num);
       f.body.value = ""; f.subject.value = ""; f.file.value = "";

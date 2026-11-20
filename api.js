@@ -13,7 +13,7 @@
   const live = !!(SB_URL && SB_KEY && window.supabase);
   const sb = live ? window.supabase.createClient(SB_URL, SB_KEY) : null;
 
-  const DEMO_KEY = "lora_demo_db_v7";
+  const DEMO_KEY = "lora_demo_db_v8";
   const TYPES = ["character", "style", "concept", "other"];
   const AUD = ["all", "alt"];
   const norm = (c) => String(c || "").trim().toUpperCase();
@@ -67,6 +67,8 @@
       need_subject: "Укажи тему вопроса.",
       name_reserved: "Этот ник занят, выбери другой.",
       thread_not_found: "Этот вопрос больше не существует.",
+      not_allowed: "Не узнаю тебя. Войди заново, нажав на логотип.",
+      locked: "Слишком много неверных попыток. Подожди 10 минут.",
       thread_full: "В этом вопросе уже слишком много ответов.",
       bad_image: "Картинка не загрузилась, попробуй ещё раз.",
       bad_voter: "Не получилось определить устройство. Обнови страницу."
@@ -127,7 +129,7 @@
       qa: (() => {
         const mkq = (num, thread, name, subject, body, img, voter, h, admin) => ({
           id: "q" + num, num, thread_id: thread, name, subject, body, image_url: img, voter_id: voter, ip_hash: "",
-          poster_id: demoPid(voter, thread || ("q" + num)), is_admin: !!admin, status: "approved",
+          poster_id: demoPid(voter, thread || ("q" + num)), is_admin: !!admin, status: "approved", audience: "all",
           bumped_at: t(h), created_at: t(h)
         });
         return [
@@ -135,10 +137,12 @@
           mkq(2, "q1", "", null, ">>1\nПоложи файл в папку models/loras и подключи нодой Load LoRA.\n>триггер-слово обязательно, да", null, "seed-b", 28),
           mkq(3, "q1", "Mitya", null, "Вес лучше начинать с 0.8, дальше по вкусу.", null, "seed-c", 26),
           mkq(4, null, "", "Какой вес ставить для стилей?", "Стили сильно «перебивают» персонажей. С какого веса начинать?", null, "seed-d", 8),
-          mkq(5, "q4", "CatatonicPsychosis", null, "Для стилей обычно хватает 0.5–0.7.", null, "admin", 5, true)
+          mkq(5, "q4", "CatatonicPsychosis", null, "Для стилей обычно хватает 0.5–0.7.", null, "admin", 5, true),
+          { ...mkq(6, null, "", "Секретный вопрос (бета)", "Этот вопрос видят только свои.", null, "seed-e", 3), audience: "alt" },
+          { ...mkq(7, "q6", "", null, "И ответ тоже только для своих.", null, "seed-f", 2), audience: "alt" }
         ];
       })(),
-      qaNum: 5,
+      qaNum: 7,
       qaBans: [],
       qaWarn: []
     };
@@ -183,7 +187,7 @@
   const qaUrl = (path) => sb.storage.from("qa").getPublicUrl(path).data.publicUrl;
   const mapQa = (p) => ({ ...p, image_url: p.image_path ? qaUrl(p.image_path) : null });
   const qaPublic = (p) => ({ id: p.id, num: p.num, thread_id: p.thread_id, name: p.name, subject: p.subject, body: p.body, image_url: p.image_url || null,
-    poster_id: p.poster_id, is_admin: p.is_admin, created_at: p.created_at, bumped_at: p.bumped_at });
+    poster_id: p.poster_id, is_admin: p.is_admin, created_at: p.created_at, bumped_at: p.bumped_at, audience: p.audience === "alt" ? "alt" : "all" });
   const newest = (a, b) => new Date(b.created_at) - new Date(a.created_at);
 
   // загрузка файла: Supabase Storage (длинное случайное имя) или data-URL в демо-режиме
@@ -445,8 +449,8 @@
     async qaThreads() {
       if (!live) {
         const d = demoDb();
-        return d.qa.filter((p) => !p.thread_id && p.status === "approved")
-          .map((p) => ({ ...qaPublic(p), reply_count: d.qa.filter((r) => r.thread_id === p.id && r.status === "approved").length }))
+        return d.qa.filter((p) => !p.thread_id && p.status === "approved" && p.audience !== "alt")
+          .map((p) => ({ ...qaPublic(p), reply_count: d.qa.filter((r) => r.thread_id === p.id && r.status === "approved" && r.audience !== "alt").length }))
           .sort((a, b) => new Date(b.bumped_at) - new Date(a.bumped_at));
       }
       const { data, error } = await sb.from("qa_public").select("*").is("thread_id", null).order("bumped_at", { ascending: false }).limit(60);
@@ -456,9 +460,9 @@
     async qaThread(id) {
       if (!live) {
         const d = demoDb();
-        const op = d.qa.find((p) => p.id === id && !p.thread_id && p.status === "approved");
+        const op = d.qa.find((p) => p.id === id && !p.thread_id && p.status === "approved" && p.audience !== "alt");
         if (!op) return null;
-        const replies = d.qa.filter((r) => r.thread_id === id && r.status === "approved").sort((a, b) => a.num - b.num).map(qaPublic);
+        const replies = d.qa.filter((r) => r.thread_id === id && r.status === "approved" && r.audience !== "alt").sort((a, b) => a.num - b.num).map(qaPublic);
         return { op: qaPublic(op), replies };
       }
       const [o, r] = await Promise.all([
@@ -469,8 +473,33 @@
       if (r.error) throw r.error;
       return o.data ? { op: mapQa(o.data), replies: (r.data || []).map(mapQa) } : null;
     },
-    // thread = id вопроса или null для нового вопроса; возвращает { num, pending }
-    async qaPost({ thread, name, subject, body, file }) {
+    // закрытая версия: все вопросы, включая секретные. Неверный пароль -> null
+    async altQaThreads(password) {
+      if (!live) {
+        const d = demoDb();
+        if (password !== (d.settings && d.settings.alt_password)) return null;
+        return d.qa.filter((p) => !p.thread_id && p.status === "approved")
+          .map((p) => ({ ...qaPublic(p), reply_count: d.qa.filter((r) => r.thread_id === p.id && r.status === "approved").length }))
+          .sort((a, b) => new Date(b.bumped_at) - new Date(a.bumped_at));
+      }
+      const { data, error } = await sb.rpc("alt_qa_threads", { p_password: password });
+      if (error) throw error;
+      return data ? data.map(mapQa) : null;
+    },
+    async altQaThread(password, id) {
+      if (!live) {
+        const d = demoDb();
+        if (password !== (d.settings && d.settings.alt_password)) return null;
+        const op = d.qa.find((p) => p.id === id && !p.thread_id && p.status === "approved");
+        return { op: op ? qaPublic(op) : null, replies: d.qa.filter((r) => r.thread_id === id && r.status === "approved").sort((a, b) => a.num - b.num).map(qaPublic) };
+      }
+      const { data, error } = await sb.rpc("alt_qa_thread", { p_password: password, p_id: id });
+      if (error) throw error;
+      if (!data) return null;
+      return { op: data.op ? mapQa(data.op) : null, replies: (data.replies || []).map(mapQa) };
+    },
+    // thread = id вопроса или null для нового вопроса; secret + password = секретный вопрос; возвращает { num, pending }
+    async qaPost({ thread, name, subject, body, file, secret, password }) {
       const v = voterId();
       if (!live) {
         const d = demoDb();
@@ -481,14 +510,17 @@
         if (!body && !file) throw qaErr(new Error("empty"));
         if (!thread && !subject) throw qaErr(new Error("need_subject"));
         if (name && BAD_WORDS_NAME.test(name)) throw qaErr(new Error("name_reserved"));
-        if (thread && !d.qa.find((p) => p.id === thread && !p.thread_id && p.status === "approved")) throw qaErr(new Error("thread_not_found"));
+        const parent = thread ? d.qa.find((p) => p.id === thread && !p.thread_id && p.status === "approved") : null;
+        if (thread && !parent) throw qaErr(new Error("thread_not_found"));
+        const aud = parent ? (parent.audience === "alt" ? "alt" : "all") : (secret ? "alt" : "all");
+        if (aud === "alt" && password !== (d.settings && d.settings.alt_password)) throw new Error("Не узнаю тебя. Войди заново, нажав на логотип.");
         const img = file ? await fileToDataUrl(await prepareImage(file, 900, 0.8)) : null;
         const num = (d.qaNum = (d.qaNum || 0) + 1);
         const id = uuid();
         const status = d.settings && d.settings.qa_premod ? "pending" : "approved";
         const now = new Date().toISOString();
         d.qa.push({ id, num, thread_id: thread || null, name: name || null, subject: thread ? null : subject, body, image_url: img,
-          voter_id: v, ip_hash: "", poster_id: demoPid(v, thread || id), is_admin: false, status, bumped_at: now, created_at: now });
+          voter_id: v, ip_hash: "", poster_id: demoPid(v, thread || id), is_admin: false, status, audience: aud, bumped_at: now, created_at: now });
         if (thread && status === "approved") d.qa.find((p) => p.id === thread).bumped_at = now;
         demoSave(d);
         return { num, pending: status === "pending" };
@@ -503,7 +535,7 @@
           throw up.error;
         }
       }
-      const { data, error } = await sb.rpc("qa_post", { p_voter: v, p_thread: thread || null, p_name: name || null, p_subject: subject || null, p_body: body || "", p_image: path });
+      const { data, error } = await sb.rpc("qa_post", { p_voter: v, p_thread: thread || null, p_name: name || null, p_subject: subject || null, p_body: body || "", p_image: path, p_secret: !!secret, p_password: password || null });
       if (error) {
         if (path) { try { await sb.storage.from("qa").remove([path]); } catch (e) {} }
         throw qaErr(error);
@@ -800,7 +832,7 @@
           const d = demoDb();
           const num = (d.qaNum = (d.qaNum || 0) + 1);
           const now = new Date().toISOString();
-          d.qa.push({ id: uuid(), num, thread_id: threadId, name: C.AUTHOR || "Автор", subject: null, body,
+          d.qa.push({ id: uuid(), num, thread_id: threadId, audience: (d.qa.find((x) => x.id === threadId) || {}).audience === "alt" ? "alt" : "all", name: C.AUTHOR || "Автор", subject: null, body,
             image_url: file ? await fileToDataUrl(await prepareImage(file, 1000, 0.85)) : null,
             voter_id: "admin", ip_hash: "", poster_id: "admin", is_admin: true, status: "approved", bumped_at: now, created_at: now });
           d.qa.find((x) => x.id === threadId).bumped_at = now;
@@ -813,8 +845,9 @@
           const up = await sb.storage.from("qa").upload(path, blob, { contentType: "image/jpeg" });
           if (up.error) throw up.error;
         }
+        const par = await sb.from("qa_posts").select("audience").eq("id", threadId).maybeSingle();
         const { error } = await sb.from("qa_posts").insert({ thread_id: threadId, name: C.AUTHOR || "Автор", body, image_path: path,
-          voter_id: "admin", is_admin: true, status: "approved" });
+          voter_id: "admin", is_admin: true, status: "approved", audience: par.data && par.data.audience === "alt" ? "alt" : "all" });
         if (error) { if (path) { try { await sb.storage.from("qa").remove([path]); } catch (e) {} } throw error; }
       },
       async qaWarn(voter, text, postNum) {

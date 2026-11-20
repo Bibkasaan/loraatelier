@@ -509,7 +509,7 @@
     const title = op && op.subject ? op.subject : "";
     return `<div class="qitem ${p.status === "pending" ? "pending" : ""}" data-id="${esc(p.id)}">
       <div class="qinfo">
-        <b>№${p.num}</b> · ${p.thread_id ? "ответ в «" + esc(title) + "»" : "<b>вопрос: " + esc(p.subject || "") + "</b>"}
+        <b>№${p.num}</b>${p.audience === "alt" ? " · 🔒 скрыто" : ""} · ${p.thread_id ? "ответ в «" + esc(title) + "»" : "<b>вопрос: " + esc(p.subject || "") + "</b>"}
         <small>· ${esc(p.name || "Anonymous")}${p.is_admin ? " ★ автор" : " · ID " + esc(p.poster_id) + " · устройство " + esc(shortV(p.voter_id))}${p.ip_hash ? " · адрес " + esc(shortV(p.ip_hash)) : ""} · ${fmt(p.created_at)}${p.status === "pending" ? " · ⏳ ждёт проверки" : ""}</small>
         ${p.body ? `<div class="qtext">${esc(p.body)}</div>` : ""}
         ${p.image_url ? `<img src="${esc(p.image_url)}" alt="">` : ""}
